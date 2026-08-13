@@ -1,69 +1,128 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Reveal } from "@/components/Reveal";
+import { ArtSpot } from "@/components/ArtSpot";
+import { LocationReveal } from "@/components/LocationReveal";
+import { MontageReveal } from "@/components/MontageReveal";
+import { RoadTimeline } from "@/components/RoadTimeline";
+import { projects } from "@/data/projects";
+
+const MANA_PHOTOS = [
+  "/art/personal-site-mana-1.jpg",
+  "/art/personal-site-mana-2.jpg",
+  "/art/personal-site-mana-3.jpg",
+  "/art/personal-site-mana-4.jpg",
+  "/art/personal-site-mana-5.jpg",
+  "/art/personal-site-mana-6.jpg",
+  "/art/personal-site-mana-7.jpg",
+  "/art/personal-site-mana-8.jpg",
+  "/art/personal-site-mana-9.jpg",
+  "/art/personal-site-mana-10.jpg",
+  "/art/personal-site-mana-11.jpg",
+  "/art/personal-site-mana-12.jpg",
+  "/art/personal-site-mana-13.jpg",
+  "/art/personal-site-mana-14.jpg",
+  "/art/personal-site-mana-15.jpg",
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-16 sm:px-8 sm:pt-24">
+      <ArtSpot variant={0} className="left-[-70px] top-6 hidden lg:block" rotate={-6} />
+      <ArtSpot variant={1} className="right-[-70px] top-0 hidden lg:block" rotate={10} />
+
+      <Reveal>
+        <p className="text-[15px] leading-relaxed text-muted">
+          hi, i&apos;m{" "}
+          <MontageReveal
+            label="mana"
+            images={MANA_PHOTOS}
+            className="text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent"
+          />
+          .
+        </p>
+      </Reveal>
+
+      <Reveal delay={0.08} className="mt-4 max-w-xl">
+        <h1 className="text-[15px] leading-relaxed text-foreground sm:text-base">
+          12, based in{" "}
+          <LocationReveal
+            label="kelowna, bc"
+            image="/art/personal-site-kelowna.jpg"
+            className="text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent"
+          />
+          , and the founder and ceo of{" "}
+          <span className="text-foreground/90">voxa voice</span> and{" "}
+          <span className="text-foreground/90">voxa agents</span>. i spend most of my time building ai
+          products that quietly do work most people assumed still needed a human.
+        </h1>
+      </Reveal>
+
+      <Reveal delay={0.12} className="mt-6 max-w-xl">
+        <p className="text-[15px] leading-relaxed text-muted">
+          i started coding out of curiosity and kept going because building things that ship is more
+          interesting than anything a classroom offers. voxa grew out of watching small businesses waste
+          hours on calls, follow-ups, and repetitive work that ai can now just handle — so i&apos;m building
+          the tools to hand that work off.
+        </p>
+      </Reveal>
+
+      <section className="relative mt-28">
+        <Reveal>
+          <p className="text-[13px] uppercase tracking-widest text-muted">what i&apos;m building</p>
+        </Reveal>
+
+        <div className="mt-6 divide-y divide-border/70 border-t border-border/70">
+          {projects.map((project, i) => (
+            <Reveal key={project.slug} delay={i * 0.05}>
+              <Link
+                href="/projects"
+                className="group flex items-center justify-between gap-6 py-5 transition-colors"
+              >
+                <div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[15px] text-foreground transition-colors group-hover:text-accent">
+                      {project.name}
+                    </span>
+                    <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
+                      {project.tag}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[13px] text-muted">{project.tagline}</p>
+                </div>
+                <span className="shrink-0 text-muted transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent">
+                  ↗
+                </span>
+              </Link>
+            </Reveal>
+          ))}
+        </div>
+      </section>
+
+      <section className="relative mt-28">
+        <ArtSpot variant={2} className="left-[-80px] bottom-0 hidden lg:block" size={100} rotate={-8} />
+        <Reveal>
+          <p className="text-[13px] uppercase tracking-widest text-muted">how this started</p>
+        </Reveal>
+
+        <Reveal delay={0.06} className="mt-10">
+          <RoadTimeline />
+        </Reveal>
+      </section>
+
+      <section className="relative mt-28">
+        <ArtSpot variant={3} className="right-[-60px] top-2 hidden lg:block" size={100} rotate={-10} />
+        <Reveal>
+          <p className="text-[13px] uppercase tracking-widest text-muted">outside of voxa</p>
+        </Reveal>
+        <Reveal delay={0.06} className="mt-5 max-w-xl">
+          <p className="text-[15px] leading-relaxed text-muted">
+            i play select academy soccer, and i&apos;m a huge extrovert who loves meeting people and
+            traveling to learn about new cultures. i&apos;ll read almost anything, but i&apos;m especially
+            into psychology — cognitive biases, social proof, cialdini&apos;s work — and philosophy, mostly
+            plato&apos;s world of forms and descartes. also a big fan of dogs, sushi, and boba tea.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        </Reveal>
+      </section>
     </div>
   );
 }
