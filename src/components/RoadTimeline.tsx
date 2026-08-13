@@ -6,11 +6,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 type Milestone = {
   age: string;
-  title: string;
+  title: ReactNode;
   description: ReactNode;
 };
 
 const linkClass = "underline decoration-border underline-offset-4 hover:text-accent hover:decoration-accent";
+const voxaLinkClass =
+  "text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent";
 
 const MILESTONES: Milestone[] = [
   {
@@ -42,11 +44,18 @@ const MILESTONES: Milestone[] = [
   },
   {
     age: "age 11",
-    title: "started voxa voice",
+    title: (
+      <>
+        started{" "}
+        <Link href="https://voxaassistant.com" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
+          voxa voice
+        </Link>
+      </>
+    ),
     description: (
       <>
         started building{" "}
-        <Link href="https://voxaassistant.com" target="_blank" rel="noopener noreferrer" className={linkClass}>
+        <Link href="https://voxaassistant.com" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
           voxa voice
         </Link>{" "}
         after watching my dad&apos;s business miss calls it couldn&apos;t afford to miss. got scouted to
@@ -61,11 +70,11 @@ const MILESTONES: Milestone[] = [
     description: (
       <>
         started building an online brand and scaled{" "}
-        <Link href="https://voxaassistant.com" target="_blank" rel="noopener noreferrer" className={linkClass}>
+        <Link href="https://voxaassistant.com" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
           voxa voice
         </Link>{" "}
         to 5+ pilots and first revenue. founded{" "}
-        <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={linkClass}>
+        <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
           voxa agents
         </Link>{" "}
         under the umbrella company, voxa. picked up a medici grant from 1517 and had a wild press run —

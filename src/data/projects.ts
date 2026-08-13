@@ -15,7 +15,6 @@ export const projects: Project[] = [
     tagline: "the company behind everything below",
     description:
       "voxa is the umbrella — an ai automation company building products that pick up the busywork for small and mid-size businesses. voxa voice and voxa agents both live under it.",
-    href: "#",
     tag: "company",
   },
   {
@@ -24,7 +23,7 @@ export const projects: Project[] = [
     tagline: "ai receptionists for smbs",
     description:
       "an ai phone receptionist that answers, books, and follows up like your best front-desk hire — so smbs never miss a call again.",
-    href: "#",
+    href: "https://voxaassistant.com",
     tag: "product",
   },
   {
@@ -33,7 +32,7 @@ export const projects: Project[] = [
     tagline: "think lindy, but sharper",
     description:
       "autonomous ai agents that actually finish the task — built for teams who want automation without babysitting a workflow builder.",
-    href: "#",
+    href: "https://getvoxa.co",
     tag: "product",
   },
 ];

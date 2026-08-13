@@ -1,10 +1,14 @@
 import Link from "next/link";
+import { preload } from "react-dom";
 import { Reveal } from "@/components/Reveal";
 import { ArtSpot } from "@/components/ArtSpot";
 import { LocationReveal } from "@/components/LocationReveal";
 import { MontageReveal } from "@/components/MontageReveal";
 import { RoadTimeline } from "@/components/RoadTimeline";
 import { projects } from "@/data/projects";
+
+const voxaLinkClass =
+  "text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent";
 
 const MANA_PHOTOS = [
   "/art/personal-site-mana-1.jpg",
@@ -25,6 +29,8 @@ const MANA_PHOTOS = [
 ];
 
 export default function Home() {
+  MANA_PHOTOS.forEach((src) => preload(src, { as: "image" }));
+
   return (
     <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-16 sm:px-8 sm:pt-24">
       <ArtSpot variant={0} className="left-[-70px] top-6 hidden lg:block" rotate={-6} />
@@ -51,9 +57,20 @@ export default function Home() {
             className="text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent"
           />
           , and the founder and ceo of{" "}
-          <span className="text-foreground/90">voxa voice</span> and{" "}
-          <span className="text-foreground/90">voxa agents</span>. i spend most of my time building ai
-          products that quietly do work most people assumed still needed a human.
+          <Link
+            href="https://voxaassistant.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={voxaLinkClass}
+          >
+            voxa voice
+          </Link>{" "}
+          and{" "}
+          <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
+            voxa agents
+          </Link>
+          . i spend most of my time building ai products that quietly do work most people assumed still
+          needed a human.
         </h1>
       </Reveal>
 
@@ -72,29 +89,40 @@ export default function Home() {
         </Reveal>
 
         <div className="mt-6 divide-y divide-border/70 border-t border-border/70">
-          {projects.map((project, i) => (
-            <Reveal key={project.slug} delay={i * 0.05}>
-              <Link
-                href="/projects"
-                className="group flex items-center justify-between gap-6 py-5 transition-colors"
-              >
-                <div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[15px] text-foreground transition-colors group-hover:text-accent">
-                      {project.name}
-                    </span>
-                    <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
-                      {project.tag}
-                    </span>
+          {projects.map((project, i) => {
+            const external = project.href?.startsWith("http") ?? false;
+            return (
+              <Reveal key={project.slug} delay={i * 0.05}>
+                <Link
+                  href={project.href ?? "/projects"}
+                  target={external ? "_blank" : undefined}
+                  rel={external ? "noopener noreferrer" : undefined}
+                  className="group flex items-center justify-between gap-6 py-5 transition-colors"
+                >
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={
+                          external
+                            ? `text-[15px] ${voxaLinkClass}`
+                            : "text-[15px] text-foreground transition-colors group-hover:text-accent"
+                        }
+                      >
+                        {project.name}
+                      </span>
+                      <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
+                        {project.tag}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[13px] text-muted">{project.tagline}</p>
                   </div>
-                  <p className="mt-1 text-[13px] text-muted">{project.tagline}</p>
-                </div>
-                <span className="shrink-0 text-muted transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent">
-                  ↗
-                </span>
-              </Link>
-            </Reveal>
-          ))}
+                  <span className="shrink-0 text-muted transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent">
+                    ↗
+                  </span>
+                </Link>
+              </Reveal>
+            );
+          })}
         </div>
       </section>
 

@@ -8,6 +8,12 @@ export const metadata: Metadata = {
   title: "projects — mana jampala",
 };
 
+const voxaLinkClass =
+  "text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent";
+
+const cardClass =
+  "group relative block overflow-hidden rounded-2xl border border-border/70 bg-surface p-6 transition-colors hover:border-accent/50 sm:p-8";
+
 export default function Projects() {
   return (
     <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-16 sm:px-8 sm:pt-24">
@@ -23,24 +29,22 @@ export default function Projects() {
       </Reveal>
 
       <div className="mt-16 space-y-6">
-        {projects.map((project, i) => (
-          <Reveal key={project.slug} delay={i * 0.06}>
-            <Link
-              href={project.href ?? "#"}
-              className="group relative block overflow-hidden rounded-2xl border border-border/70 bg-surface p-6 transition-colors hover:border-accent/50 sm:p-8"
-            >
-              {i === 1 && (
-                <ArtSpot
-                  variant={3}
-                  className="right-4 top-4 hidden sm:block"
-                  size={64}
-                  rotate={-12}
-                />
+        {projects.map((project, i) => {
+          const content = (
+            <>
+              {project.slug === "voxa-voice" && (
+                <ArtSpot variant={3} className="right-4 top-4 hidden sm:block" size={64} rotate={-12} />
               )}
               <div className="flex items-start justify-between gap-6">
                 <div>
                   <div className="flex items-center gap-3">
-                    <h2 className="text-lg text-foreground transition-colors group-hover:text-accent">
+                    <h2
+                      className={
+                        project.href
+                          ? `text-lg ${voxaLinkClass}`
+                          : "text-lg text-foreground transition-colors group-hover:text-accent"
+                      }
+                    >
                       {project.name}
                     </h2>
                     <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
@@ -49,22 +53,52 @@ export default function Projects() {
                   </div>
                   <p className="mt-1 text-[13px] text-muted">{project.tagline}</p>
                 </div>
-                <span className="shrink-0 text-muted transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent">
-                  ↗
-                </span>
+                {project.href && (
+                  <span className="shrink-0 text-muted transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent">
+                    ↗
+                  </span>
+                )}
               </div>
-              <p className="mt-5 max-w-lg text-[14px] leading-relaxed text-muted">
-                {project.description}
-              </p>
-            </Link>
-          </Reveal>
-        ))}
+              {project.slug === "voxa" ? (
+                <p className="mt-5 max-w-lg text-[14px] leading-relaxed text-muted">
+                  voxa is the umbrella — an ai automation company building products that pick up the
+                  busywork for small and mid-size businesses.{" "}
+                  <Link
+                    href="https://voxaassistant.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={voxaLinkClass}
+                  >
+                    voxa voice
+                  </Link>{" "}
+                  and{" "}
+                  <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
+                    voxa agents
+                  </Link>{" "}
+                  both live under it.
+                </p>
+              ) : (
+                <p className="mt-5 max-w-lg text-[14px] leading-relaxed text-muted">{project.description}</p>
+              )}
+            </>
+          );
+
+          return (
+            <Reveal key={project.slug} delay={i * 0.06}>
+              {project.href ? (
+                <Link href={project.href} target="_blank" rel="noopener noreferrer" className={cardClass}>
+                  {content}
+                </Link>
+              ) : (
+                <div className={cardClass}>{content}</div>
+              )}
+            </Reveal>
+          );
+        })}
       </div>
 
       <Reveal delay={0.1} className="mt-16">
-        <p className="text-[13px] text-muted">
-          more shipping soon — this list grows as voxa does.
-        </p>
+        <p className="text-[13px] text-muted">more shipping soon — this list grows as voxa does.</p>
       </Reveal>
     </div>
   );

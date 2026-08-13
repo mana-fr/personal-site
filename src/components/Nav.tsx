@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 import { SparkleBurst } from "./Sparkles";
+import { ParticleWordmark } from "./ParticleWordmark";
 
 const LINKS = [
   { href: "/", label: "home" },
@@ -58,15 +58,7 @@ export function Nav() {
       >
         <Link href="/" className="relative inline-block">
           <SparkleBurst burstId={burstId} />
-          <motion.span
-            animate={{ fontSize: scrolled ? SMALL_PX : heroPx }}
-            transition={{ type: "spring", stiffness: 140, damping: 16, mass: 0.7 }}
-            className="font-display block origin-top-left select-none italic leading-[1.08] tracking-tight text-foreground"
-          >
-            mana
-            <br />
-            jampala
-          </motion.span>
+          <ParticleWordmark lines={["mana", "jampala"]} fontSize={scrolled ? SMALL_PX : heroPx} />
         </Link>
 
         <div className="flex items-center gap-6 pb-1.5">

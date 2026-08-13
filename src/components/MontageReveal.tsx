@@ -100,6 +100,16 @@ export function MontageReveal({
 
   useEffect(() => setMounted(true), []);
 
+  // force full decode (not just fetch) well before the first hover, so the
+  // reveal doesn't stutter rasterizing 15 photos for the first time mid-spring
+  useEffect(() => {
+    images.forEach((src) => {
+      const img = new window.Image();
+      img.src = src;
+      img.decode?.().catch(() => {});
+    });
+  }, [images]);
+
   useEffect(() => {
     const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
     onResize();
@@ -109,16 +119,22 @@ export function MontageReveal({
 
   useEffect(() => {
     if (!hovered) return;
+    let raf = 0;
     const update = () => {
+      raf = 0;
       const r = ref.current?.getBoundingClientRect();
       if (r) setRect({ x: r.left, y: r.top, width: r.width, height: r.height });
     };
+    const onScrollOrResize = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
     update();
-    window.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onScrollOrResize);
     return () => {
-      window.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScrollOrResize);
+      window.removeEventListener("resize", onScrollOrResize);
     };
   }, [hovered]);
 
@@ -146,8 +162,8 @@ export function MontageReveal({
 
   const isPolaroid = (frame: Frame) => frame === "polaroid";
   const padX = (w: number) => w * 0.07;
-  const padTop = (w: number) => w * 0.07;
-  const padBottom = (w: number) => w * 0.24;
+  const padTop = (h: number) => h * 0.07;
+  const padBottom = (h: number) => h * 0.24;
 
   return (
     <>
@@ -165,7 +181,7 @@ export function MontageReveal({
             aria-hidden
             onMouseEnter={open}
             onMouseLeave={close}
-            className="pointer-events-none fixed inset-0 z-[200] transition-opacity duration-500 ease-out"
+            className="pointer-events-none fixed inset-0 z-[200] transition-opacity duration-300 ease-out"
             style={{ opacity: hovered && hole ? 1 : 0 }}
           >
             <svg width="100%" height="100%" className="h-full w-full overflow-hidden">
@@ -183,9 +199,6 @@ export function MontageReveal({
                     />
                   )}
                 </mask>
-                <filter id={`${maskId}-shadow`} x="-40%" y="-40%" width="180%" height="180%">
-                  <feDropShadow dx="0" dy="6" stdDeviation="9" floodOpacity="0.4" />
-                </filter>
                 {tiles.map((t, i) =>
                   t.frame === "circle" ? (
                     <clipPath key={i} id={`${maskId}-clip-${i}`}>
@@ -195,9 +208,9 @@ export function MontageReveal({
                     <clipPath key={i} id={`${maskId}-clip-${i}`}>
                       <rect
                         x={isPolaroid(t.frame) ? padX(t.w) : 0}
-                        y={isPolaroid(t.frame) ? padTop(t.w) : 0}
+                        y={isPolaroid(t.frame) ? padTop(t.h) : 0}
                         width={isPolaroid(t.frame) ? t.w - padX(t.w) * 2 : t.w}
-                        height={isPolaroid(t.frame) ? t.h - padTop(t.w) - padBottom(t.w) : t.h}
+                        height={isPolaroid(t.frame) ? t.h - padTop(t.h) - padBottom(t.h) : t.h}
                         rx={isPolaroid(t.frame) ? 3 : 14}
                       />
                     </clipPath>
@@ -213,7 +226,7 @@ export function MontageReveal({
                     key={`sticker-${i}`}
                     initial={{ opacity: 0, scale: 0 }}
                     animate={hovered ? { opacity: 0.9, scale: 1 } : { opacity: 0, scale: 0 }}
-                    transition={{ type: "spring", stiffness: 160, damping: 14, delay: hovered ? 0.5 + i * 0.08 : 0 }}
+                    transition={{ type: "spring", stiffness: 220, damping: 20, delay: hovered ? 0.22 + i * 0.05 : 0 }}
                     style={{
                       x: (s.leftPct / 100) * viewport.w - s.size / 2,
                       y: (s.topPct / 100) * viewport.h - s.size / 2,
@@ -230,8 +243,13 @@ export function MontageReveal({
                 {tiles.map((t, i) => (
                   <motion.g
                     key={i}
-                    filter={`url(#${maskId}-shadow)`}
-                    style={{ x: t.cx - t.w / 2, y: t.cy - t.h / 2, originX: "50%", originY: "50%", pointerEvents: "auto" }}
+                    style={{
+                      x: t.cx - t.w / 2,
+                      y: t.cy - t.h / 2,
+                      originX: "50%",
+                      originY: "50%",
+                      pointerEvents: hovered ? "auto" : "none",
+                    }}
                     initial={{ opacity: 0, scale: 0.5, rotate: t.rotate + (i % 2 === 0 ? -14 : 14) }}
                     animate={
                       hovered
@@ -241,13 +259,26 @@ export function MontageReveal({
                     whileHover={{ scale: 1.12, rotate: 0, zIndex: 10 }}
                     transition={{
                       type: "spring",
-                      stiffness: 130,
-                      damping: 14,
-                      mass: 0.6,
-                      delay: hovered ? i * 0.035 : 0,
+                      stiffness: 260,
+                      damping: 22,
+                      mass: 0.5,
+                      delay: hovered ? i * 0.018 : 0,
                     }}
                     className="cursor-default"
                   >
+                    {/* flat, filter-free shadow — cheap to render vs. a blurred feDropShadow */}
+                    {t.frame === "circle" ? (
+                      <circle
+                        cx={t.w / 2 + 4}
+                        cy={t.h / 2 + 6}
+                        r={Math.min(t.w, t.h) / 2 + 5}
+                        fill="#000"
+                        opacity={0.28}
+                      />
+                    ) : (
+                      <rect x={4} y={6} width={t.w} height={t.h} rx={5} fill="#000" opacity={0.28} />
+                    )}
+
                     {t.frame === "polaroid" && (
                       <rect x={0} y={0} width={t.w} height={t.h} rx={5} fill="#f9f7f1" />
                     )}
@@ -281,13 +312,13 @@ export function MontageReveal({
                     {t.caption && (
                       <text
                         x={t.w / 2}
-                        y={t.h - padBottom(t.w) / 2 - t.w * 0.01}
+                        y={t.h - padBottom(t.h) / 2 - t.w * 0.01}
                         textAnchor="middle"
                         fill="#2a2a2a"
                         fontFamily="var(--font-hand)"
                         fontWeight={700}
                         fontSize={Math.max(13, t.w * 0.115)}
-                        transform={`rotate(${(i % 2 === 0 ? -2.5 : 2.5)}, ${t.w / 2}, ${t.h - padBottom(t.w) / 2})`}
+                        transform={`rotate(${(i % 2 === 0 ? -2.5 : 2.5)}, ${t.w / 2}, ${t.h - padBottom(t.h) / 2})`}
                       >
                         {t.caption}
                       </text>
