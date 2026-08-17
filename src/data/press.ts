@@ -6,12 +6,30 @@ export type PressItem = {
   image?: string; // screenshot in /public/press
   imageWidth?: number; // natural pixel width of the screenshot
   imageHeight?: number; // natural pixel height of the screenshot
+  image2?: string; // optional second image, shown side-by-side with image
+  image2Width?: number;
+  image2Height?: number;
   video?: boolean; // shows a "(video interview)" tag
+  note?: string; // small muted line under the title, eg. viewing instructions
 };
 
 // Add real mentions here as they come in.
 // Each item renders as a row on /press automatically.
 export const press: PressItem[] = [
+  {
+    outlet: "the kim komando show",
+    title: "featured in the final segment, talking about voxa and the ai receptionist i built",
+    date: "2026-08-08",
+    href: "https://www.youtube.com/watch?v=xDuMhHVUBTk",
+    image: "/press/kim-komando-1.jpg",
+    imageWidth: 1280,
+    imageHeight: 714,
+    image2: "/press/kim-komando-2.jpg",
+    image2Width: 1280,
+    image2Height: 718,
+    video: true,
+    note: "my segment is at the very end — fast-forward to the last part of the video",
+  },
   {
     outlet: "india today",
     title: "12-year-old Indian-origin girl builds AI startup",
