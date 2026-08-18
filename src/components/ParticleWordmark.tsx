@@ -13,7 +13,13 @@ type Particle = {
   wakeAt: number; // performance.now() timestamp before which the particle ignores all forces
 };
 
-const STEP = 2; // sampling grid spacing, css px — fine enough to catch thin curled strokes (eg. the "j" swash's terminal loop)
+// Sampling grid spacing, css px. blockHasInk() checks every pixel inside
+// each STEP-sized cell (not just its corner), so this doesn't need to be
+// this dense to still catch thin curled strokes (eg. the "j" swash's
+// terminal loop) — a 3x3 pixel cell reliably catches a 1-2px-wide stroke
+// passing through it. Denser than that mainly just multiplies particle
+// count (and per-frame draw cost) for no coverage benefit.
+const STEP = 3;
 const INK_ALPHA_THRESHOLD = 50; // low enough to catch anti-aliased/thin ink, not just solid fill
 const REPEL_RADIUS = 46;
 const REPEL_STRENGTH = 1.4;
@@ -117,6 +123,13 @@ export function ParticleWordmark({
   const particlesRef = useRef<Particle[]>([]);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
+  // getComputedStyle forces a style recalc, and hex parsing is needless
+  // string work — both are real, avoidable cost done 60x/sec if repeated
+  // every frame. Theme colors don't change mid-hover in any normal case, so
+  // read + parse them once per hover session instead.
+  const colorsRef = useRef<{ accent: { r: number; g: number; b: number }; foreground: { r: number; g: number; b: number } } | null>(
+    null,
+  );
   const cleanupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveStartRef = useRef<number | null>(null);
   const crossfadeStartedRef = useRef(false);
@@ -158,12 +171,14 @@ export function ParticleWordmark({
     const lineEls = Array.from(textEl.children) as HTMLElement[];
     const baselinesRaw = lineEls.map((lineEl) => lineEl.getBoundingClientRect().top - rect.top + baselineWithinLine);
 
-    // Fixed, generous padding on EVERY side, not just below/right. Decorative
-    // swashes can extend past the glyph's nominal box in any direction — the
-    // "j" here curls left of its own drawing origin (x=0), not just below
-    // the line, and every previous fix only ever padded right/bottom, so it
-    // never touched that side no matter how generous it got.
-    const PAD = Math.max(50, fontPx * 1.2);
+    // Padding on EVERY side, not just below/right — decorative swashes can
+    // extend past the glyph's nominal box in any direction (measured: the
+    // "j" here curls about 0.2x font-size left of its own drawing origin).
+    // This margin is comfortably larger than that measured worst case
+    // without being the very large, canvas-quadrupling margin from initial
+    // debugging — a bigger canvas means more area to scan per hover-start
+    // and more pixels in play for the browser to composite each frame.
+    const PAD = Math.max(35, fontPx * 0.55);
     const width = Math.ceil(rect.width + PAD * 2);
     const height = Math.ceil(Math.max(rect.height, ...baselinesRaw) + PAD * 2);
     if (width < 1 || height < 1) return;
@@ -230,8 +245,7 @@ export function ParticleWordmark({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
-    const rootStyles = getComputedStyle(document.documentElement);
-    const accentHex = rootStyles.getPropertyValue("--accent").trim() || "#ff6fb0";
+    const colors = colorsRef.current ?? { accent: hexToRgb("#ff6fb0"), foreground: hexToRgb("#ededed") };
     // eslint-disable-next-line react-hooks/purity -- runs inside a requestAnimationFrame callback, never during render
     const now = performance.now();
     const leaveStart = leaveStartRef.current;
@@ -240,14 +254,19 @@ export function ParticleWordmark({
       // text color as they settle, so the swap to crisp text reads as the
       // particles turning solid rather than two mismatched layers cutting over.
       const t = Math.min(1, (now - leaveStart) / SETTLE_MIN_MS);
-      const foregroundHex = rootStyles.getPropertyValue("--foreground").trim() || "#ededed";
-      ctx.fillStyle = lerpColor(hexToRgb(accentHex), hexToRgb(foregroundHex), t);
+      ctx.fillStyle = lerpColor(colors.accent, colors.foreground, t);
     } else {
-      ctx.fillStyle = accentHex;
+      ctx.fillStyle = `rgb(${colors.accent.r}, ${colors.accent.g}, ${colors.accent.b})`;
     }
 
     const mouse = mouseRef.current;
     let allSettled = true;
+    // One shared path for every particle, filled once at the end — all
+    // particles are the same color in a given frame anyway, so a separate
+    // beginPath/arc/fill per particle (thousands of individual fill() calls
+    // per frame at this density) was pure overhead, not needed for
+    // correctness. Likely the actual source of the reported lag.
+    ctx.beginPath();
     for (const p of particlesRef.current) {
       const awake = now >= p.wakeAt;
       if (awake) {
@@ -277,10 +296,10 @@ export function ParticleWordmark({
         allSettled = false;
       }
 
-      ctx.beginPath();
+      ctx.moveTo(p.x + DOT_RADIUS, p.y);
       ctx.arc(p.x, p.y, DOT_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
     }
+    ctx.fill();
     ctx.restore();
 
     // Only crossfade to real text once the shape has actually reformed, not
@@ -339,6 +358,12 @@ export function ParticleWordmark({
     }
     await waitForStableFontSize(textEl, fontSize, 600);
     if (enterTokenRef.current !== token) return; // user already left/re-entered — this build is stale
+
+    const rootStyles = getComputedStyle(document.documentElement);
+    colorsRef.current = {
+      accent: hexToRgb(rootStyles.getPropertyValue("--accent").trim() || "#ff6fb0"),
+      foreground: hexToRgb(rootStyles.getPropertyValue("--foreground").trim() || "#ededed"),
+    };
 
     const wrapperRect = wrapperRef.current?.getBoundingClientRect();
     const entry = wrapperRect ? { x: clientX - wrapperRect.left, y: clientY - wrapperRect.top } : null;
