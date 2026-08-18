@@ -23,7 +23,9 @@ const ENTRANCE_WINDOW_MS = 620; // how long after waking a particle uses the slo
 const EXIT_SPRING = 0.015; // slow spring while dissolving back to text — unhurried gather-home
 const DAMPING = 0.8;
 const DOT_RADIUS = 1.15;
-const SETTLE_MS = 700; // grace period after mouseleave: slow gather + color sweep, before crossfading back
+const SETTLE_MIN_MS = 350; // minimum gather + color-sweep time before the crossfade may start
+const SETTLE_MAX_MS = 1400; // safety cap — crossfade starts even if something never fully converges
+const SETTLE_EPSILON_PX = 2.5; // how close to home counts as "arrived" for exit-convergence purposes
 const BURST_JITTER = 22; // px of random scatter around the cursor's entry point
 const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // How far each particle starts from its own home, as a fraction of the way
@@ -115,8 +117,9 @@ export function ParticleWordmark({
   const particlesRef = useRef<Particle[]>([]);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
-  const settleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cleanupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveStartRef = useRef<number | null>(null);
+  const crossfadeStartedRef = useRef(false);
   const enterTokenRef = useRef(0);
   const [hovered, setHovered] = useState(false);
 
@@ -236,7 +239,7 @@ export function ParticleWordmark({
       // Dissolving back to normal: sweep the dot color from pink to the real
       // text color as they settle, so the swap to crisp text reads as the
       // particles turning solid rather than two mismatched layers cutting over.
-      const t = Math.min(1, (now - leaveStart) / SETTLE_MS);
+      const t = Math.min(1, (now - leaveStart) / SETTLE_MIN_MS);
       const foregroundHex = rootStyles.getPropertyValue("--foreground").trim() || "#ededed";
       ctx.fillStyle = lerpColor(hexToRgb(accentHex), hexToRgb(foregroundHex), t);
     } else {
@@ -244,6 +247,7 @@ export function ParticleWordmark({
     }
 
     const mouse = mouseRef.current;
+    let allSettled = true;
     for (const p of particlesRef.current) {
       const awake = now >= p.wakeAt;
       if (awake) {
@@ -261,33 +265,60 @@ export function ParticleWordmark({
           leaveStart != null ? EXIT_SPRING : now - p.wakeAt < ENTRANCE_WINDOW_MS ? ENTRANCE_SPRING : SPRING;
         p.vx += (p.homeX - p.x) * springK;
         p.vy += (p.homeY - p.y) * springK;
+      } else {
+        allSettled = false;
       }
       p.vx *= DAMPING;
       p.vy *= DAMPING;
       p.x += p.vx;
       p.y += p.vy;
 
+      if (leaveStart != null && (Math.abs(p.x - p.homeX) > SETTLE_EPSILON_PX || Math.abs(p.y - p.homeY) > SETTLE_EPSILON_PX)) {
+        allSettled = false;
+      }
+
       ctx.beginPath();
       ctx.arc(p.x, p.y, DOT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
+
+    // Only crossfade to real text once the shape has actually reformed, not
+    // after a guessed fixed delay. A fixed timeout could let the crossfade
+    // start while some particles — displaced by repulsion right before you
+    // left — are still visibly catching up, which reads as a piece of the
+    // letterform vanishing and popping back once it finally arrives.
+    if (leaveStart != null && !crossfadeStartedRef.current) {
+      const elapsed = now - leaveStart;
+      if ((allSettled && elapsed > SETTLE_MIN_MS) || elapsed > SETTLE_MAX_MS) {
+        crossfadeStartedRef.current = true;
+        setHovered(false);
+        cleanupTimeoutRef.current = setTimeout(() => {
+          if (rafRef.current) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+          }
+        }, CROSSFADE_MS);
+      }
+    }
+
     rafRef.current = requestAnimationFrame(draw);
   };
 
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (settleTimeoutRef.current) clearTimeout(settleTimeoutRef.current);
+      if (cleanupTimeoutRef.current) clearTimeout(cleanupTimeoutRef.current);
     };
   }, []);
 
   const handleEnter = async (e: ReactMouseEvent<HTMLSpanElement>) => {
-    if (settleTimeoutRef.current) {
-      clearTimeout(settleTimeoutRef.current);
-      settleTimeoutRef.current = null;
+    if (cleanupTimeoutRef.current) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = null;
     }
     leaveStartRef.current = null;
+    crossfadeStartedRef.current = false;
 
     if (hovered) {
       if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
@@ -321,6 +352,11 @@ export function ParticleWordmark({
     mouseRef.current = null;
     const leaveNow = performance.now();
     leaveStartRef.current = leaveNow;
+    crossfadeStartedRef.current = false; // draw() decides when this leave's crossfade actually starts
+    if (cleanupTimeoutRef.current) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = null;
+    }
     // Particles get a staggered wake-up delay so the entrance looks like it's
     // assembling rather than popping in — but if you leave before a
     // far-off particle's delay has elapsed (eg. hovering only briefly), it's
@@ -331,13 +367,6 @@ export function ParticleWordmark({
     for (const p of particlesRef.current) {
       if (p.wakeAt > leaveNow) p.wakeAt = leaveNow;
     }
-    settleTimeoutRef.current = setTimeout(() => {
-      setHovered(false);
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    }, SETTLE_MS);
   };
 
   const handleMove = (e: ReactMouseEvent<HTMLSpanElement>) => {
