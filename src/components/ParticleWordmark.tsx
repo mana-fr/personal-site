@@ -37,13 +37,6 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550;
 const CROSSFADE_EASE = [0.4, 0, 0.2, 1] as const; // smooth, evenly-paced ease — not front-loaded
-// Blur softens the crossfade so it reads as a dissolve rather than a hard
-// swap between two different renderings — but blur dilutes a thin stroke's
-// ink over a wider area at much lower peak intensity, so at the transition's
-// midpoint (both layers ~50% opacity AND blurred at once) a thin feature
-// like the "j" tail can drop below visibility entirely while thicker letter
-// stems stay visible. Keep this small — just enough to soften the edge.
-const CROSSFADE_BLUR_PX = 1.5;
 
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
@@ -367,12 +360,10 @@ export function ParticleWordmark({
         animate={{
           fontSize,
           opacity: hovered ? 0 : 1,
-          filter: hovered ? `blur(${CROSSFADE_BLUR_PX}px)` : "blur(0px)",
         }}
         transition={{
           fontSize: { type: "spring", stiffness: 140, damping: 16, mass: 0.7 },
           opacity: { duration: CROSSFADE_MS / 1000, ease: CROSSFADE_EASE },
-          filter: { duration: CROSSFADE_MS / 1000, ease: CROSSFADE_EASE },
         }}
         className="font-display block origin-top-left select-none italic leading-[1.08] tracking-tight text-foreground"
       >
@@ -385,10 +376,9 @@ export function ParticleWordmark({
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none absolute transition-[opacity,filter] ease-[cubic-bezier(0.4,0,0.2,1)]"
+        className="pointer-events-none absolute transition-opacity ease-[cubic-bezier(0.4,0,0.2,1)]"
         style={{
           opacity: hovered ? 1 : 0,
-          filter: hovered ? "blur(0px)" : `blur(${CROSSFADE_BLUR_PX}px)`,
           transitionDuration: `${CROSSFADE_MS}ms`,
         }}
       />
