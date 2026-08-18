@@ -109,6 +109,7 @@ export function ParticleWordmark({
   fontSize: number;
   className?: string;
 }) {
+  const wrapperRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
@@ -119,7 +120,10 @@ export function ParticleWordmark({
   const enterTokenRef = useRef(0);
   const [hovered, setHovered] = useState(false);
 
-  const buildParticles = (entry: { x: number; y: number } | null) => {
+  // entry is wrapper-relative (0,0 = real text's own top-left) — the canvas
+  // itself moves around (see PAD below), so anchoring to the wrapper instead
+  // keeps this correct regardless of where the canvas ends up positioned.
+  const buildParticles = (entryWrapper: { x: number; y: number } | null) => {
     const textEl = textRef.current;
     const canvas = canvasRef.current;
     if (!textEl || !canvas) return;
@@ -149,50 +153,16 @@ export function ParticleWordmark({
     const baselineWithinLine = halfLeading + ascent;
 
     const lineEls = Array.from(textEl.children) as HTMLElement[];
-    const baselines = lineEls.map((lineEl) => lineEl.getBoundingClientRect().top - rect.top + baselineWithinLine);
+    const baselinesRaw = lineEls.map((lineEl) => lineEl.getBoundingClientRect().top - rect.top + baselineWithinLine);
 
-    // Render into a generously oversized scratch canvas, then find the actual
-    // drawn ink bounds empirically rather than trusting font-metric APIs
-    // (measureText's actualBoundingBox* can still undershoot). The padding
-    // here is deliberately much bigger than the math says it needs to be —
-    // real-world font rendering (hinting, subpixel AA, OS/browser
-    // differences) can still shift the true ink a bit from what any of this
-    // predicts, so the safety margin matters more than precision.
-    const scratchWidth = Math.ceil(rect.width + fontPx * 2.5);
-    const scratchHeight = Math.ceil(Math.max(rect.height, ...baselines) + fontPx * 2.5);
-    const scratch = document.createElement("canvas");
-    scratch.width = scratchWidth;
-    scratch.height = scratchHeight;
-    const sctx = scratch.getContext("2d");
-    if (!sctx) return;
-    sctx.fillStyle = "#fff";
-    sctx.font = fontSpec;
-    sctx.textBaseline = "alphabetic";
-    // ctx.font doesn't carry CSS letter-spacing — without setting this
-    // explicitly, canvas renders at normal tracking while the real text uses
-    // this site's tight tracking, so the sampled glyphs drift further right
-    // than the real ones with every subsequent character.
-    sctx.letterSpacing = computed.letterSpacing;
-    lines.forEach((line, i) => sctx.fillText(line, 0, baselines[i]));
-
-    const scratchData = sctx.getImageData(0, 0, scratchWidth, scratchHeight).data;
-    let maxX = 0;
-    let maxY = 0;
-    for (let y = 0; y < scratchHeight; y++) {
-      for (let x = 0; x < scratchWidth; x++) {
-        if (scratchData[(y * scratchWidth + x) * 4 + 3] > INK_ALPHA_THRESHOLD) {
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    // Generous final margin beyond the detected ink, not just a rounding
-    // buffer — real-world rendering can land a few pixels off from what gets
-    // detected here, and a bigger cushion costs nothing but empty canvas.
-    const pad = 60;
-    const width = Math.min(scratchWidth, Math.max(Math.ceil(rect.width), maxX + pad));
-    const height = Math.min(scratchHeight, Math.max(Math.ceil(rect.height), maxY + pad));
+    // Fixed, generous padding on EVERY side, not just below/right. Decorative
+    // swashes can extend past the glyph's nominal box in any direction — the
+    // "j" here curls left of its own drawing origin (x=0), not just below
+    // the line, and every previous fix only ever padded right/bottom, so it
+    // never touched that side no matter how generous it got.
+    const PAD = Math.max(50, fontPx * 1.2);
+    const width = Math.ceil(rect.width + PAD * 2);
+    const height = Math.ceil(Math.max(rect.height, ...baselinesRaw) + PAD * 2);
     if (width < 1 || height < 1) return;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -200,12 +170,34 @@ export function ParticleWordmark({
     canvas.height = height * dpr;
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+    canvas.style.left = `${-PAD}px`;
+    canvas.style.top = `${-PAD}px`;
 
+    const off = document.createElement("canvas");
+    off.width = width;
+    off.height = height;
+    const octx = off.getContext("2d");
+    if (!octx) return;
+    octx.fillStyle = "#fff";
+    octx.font = fontSpec;
+    octx.textBaseline = "alphabetic";
+    // ctx.font doesn't carry CSS letter-spacing — without setting this
+    // explicitly, canvas renders at normal tracking while the real text uses
+    // this site's tight tracking, so the sampled glyphs drift further right
+    // than the real ones with every subsequent character.
+    octx.letterSpacing = computed.letterSpacing;
+    const baselines = baselinesRaw.map((b) => b + PAD);
+    lines.forEach((line, i) => octx.fillText(line, PAD, baselines[i]));
+
+    const { data } = octx.getImageData(0, 0, width, height);
     const now = performance.now();
     const points: Particle[] = [];
     for (let y = 0; y < height; y += STEP) {
       for (let x = 0; x < width; x += STEP) {
-        if (blockHasInk(scratchData, scratchWidth, x, y, STEP, width, height, INK_ALPHA_THRESHOLD)) {
+        if (blockHasInk(data, width, x, y, STEP, width, height, INK_ALPHA_THRESHOLD)) {
+          // Convert the wrapper-relative entry point into this canvas's own
+          // local space (canvas's local (0,0) sits at wrapper (-PAD,-PAD)).
+          const entry = entryWrapper ? { x: entryWrapper.x + PAD, y: entryWrapper.y + PAD } : null;
           const startX = entry ? x + (entry.x - x) * ENTRY_PULL + (Math.random() - 0.5) * BURST_JITTER : x;
           const startY = entry ? y + (entry.y - y) * ENTRY_PULL + (Math.random() - 0.5) * BURST_JITTER : y;
           points.push({
@@ -215,7 +207,7 @@ export function ParticleWordmark({
             y: startY,
             vx: 0,
             vy: 0,
-            wakeAt: entry ? now + Math.random() * WAKE_STAGGER_MS : now,
+            wakeAt: entryWrapper ? now + Math.random() * WAKE_STAGGER_MS : now,
           });
         }
       }
@@ -317,11 +309,9 @@ export function ParticleWordmark({
     await waitForStableFontSize(textEl, fontSize, 600);
     if (enterTokenRef.current !== token) return; // user already left/re-entered — this build is stale
 
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    const entry = rect ? { x: clientX - rect.left, y: clientY - rect.top } : null;
+    const wrapperRect = wrapperRef.current?.getBoundingClientRect();
+    const entry = wrapperRect ? { x: clientX - wrapperRect.left, y: clientY - wrapperRect.top } : null;
     buildParticles(entry);
-    mouseRef.current = entry;
     setHovered(true);
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
   };
@@ -348,6 +338,7 @@ export function ParticleWordmark({
 
   return (
     <span
+      ref={wrapperRef}
       className={`relative inline-block ${className}`}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
@@ -376,7 +367,7 @@ export function ParticleWordmark({
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="pointer-events-none absolute left-0 top-0 transition-[opacity,filter] ease-[cubic-bezier(0.4,0,0.2,1)]"
+        className="pointer-events-none absolute transition-[opacity,filter] ease-[cubic-bezier(0.4,0,0.2,1)]"
         style={{
           opacity: hovered ? 1 : 0,
           filter: hovered ? "blur(0px)" : "blur(5px)",
