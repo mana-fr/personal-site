@@ -319,7 +319,18 @@ export function ParticleWordmark({
   const handleLeave = () => {
     enterTokenRef.current++; // invalidate any in-flight handleEnter build
     mouseRef.current = null;
-    leaveStartRef.current = performance.now();
+    const leaveNow = performance.now();
+    leaveStartRef.current = leaveNow;
+    // Particles get a staggered wake-up delay so the entrance looks like it's
+    // assembling rather than popping in — but if you leave before a
+    // far-off particle's delay has elapsed (eg. hovering only briefly), it's
+    // still frozen at its spawn point. Left alone, it wakes up naturally
+    // mid-exit and visibly snaps into motion — a stray "leftover" cluster
+    // that suddenly jumps. Force everyone awake now so the gather-home is
+    // uniform regardless of how long the hover lasted.
+    for (const p of particlesRef.current) {
+      if (p.wakeAt > leaveNow) p.wakeAt = leaveNow;
+    }
     settleTimeoutRef.current = setTimeout(() => {
       setHovered(false);
       if (rafRef.current) {
