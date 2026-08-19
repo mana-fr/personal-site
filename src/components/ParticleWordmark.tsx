@@ -13,14 +13,19 @@ type Particle = {
   wakeAt: number; // performance.now() timestamp before which the particle ignores all forces
 };
 
-// Sampling grid spacing, css px. blockHasInk() checks every pixel inside
-// each STEP-sized cell (not just its corner), so this doesn't need to be
-// this dense to still catch thin curled strokes (eg. the "j" swash's
-// terminal loop) — a 3x3 pixel cell reliably catches a 1-2px-wide stroke
-// passing through it. Denser than that mainly just multiplies particle
-// count (and per-frame draw cost) for no coverage benefit.
-const STEP = 3;
-const INK_ALPHA_THRESHOLD = 50; // low enough to catch anti-aliased/thin ink, not just solid fill
+// Sampling grid spacing, css px. Reverted from 3 back to 2 — dialing this
+// down for performance reintroduced a coverage gap elsewhere on the "j"
+// (the upper hook, not just the tail this had been verified against). The
+// batched single-fill() call was the actual performance win; this density
+// is what coverage correctness actually needs.
+const STEP = 2;
+const INK_MARGIN_PX = 3; // how far beyond each sampling cell's own bounds to also check for ink
+// Low enough to catch faint anti-aliased strokes — verified against a
+// direct pixel-diff of the full rendered word against the real text, not
+// just the swash. Bodoni Moda's italic has multiple thin decorative
+// flourishes (eg. a connecting stroke between "n" and "a"), any of which
+// can fall below a threshold tuned only against the "j".
+const INK_ALPHA_THRESHOLD = 12;
 const REPEL_RADIUS = 46;
 const REPEL_STRENGTH = 1.4;
 const SPRING = 0.05; // interactive spring once a particle has settled in — snappy repel/return
@@ -49,7 +54,12 @@ const CROSSFADE_EASE = [0.4, 0, 0.2, 1] as const; // smooth, evenly-paced ease �
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
 // little terminal loop on Bodoni Moda's italic "j") and miss it entirely if
-// no exact grid point happens to land on it.
+// no exact grid point happens to land on it. Also expands the checked area
+// by `margin` px on every side ("dilated") beyond the cell's own bounds —
+// canvas's text shaping doesn't always land pixel-for-pixel where the DOM's
+// does for every thin decorative stroke (eg. a connecting flourish between
+// two letters), and this catches ink a few px outside a cell's own
+// territory rather than requiring the two renderers to agree exactly.
 function blockHasInk(
   data: Uint8ClampedArray,
   stride: number,
@@ -59,11 +69,14 @@ function blockHasInk(
   maxX: number,
   maxY: number,
   threshold: number,
+  margin: number,
 ) {
-  const xEnd = Math.min(x0 + size, maxX);
-  const yEnd = Math.min(y0 + size, maxY);
-  for (let y = y0; y < yEnd; y++) {
-    for (let x = x0; x < xEnd; x++) {
+  const xStart = Math.max(0, x0 - margin);
+  const yStart = Math.max(0, y0 - margin);
+  const xEnd = Math.min(x0 + size + margin, maxX);
+  const yEnd = Math.min(y0 + size + margin, maxY);
+  for (let y = yStart; y < yEnd; y++) {
+    for (let x = xStart; x < xEnd; x++) {
       if (data[(y * stride + x) * 4 + 3] > threshold) return true;
     }
   }
@@ -226,7 +239,7 @@ export function ParticleWordmark({
     const points: Particle[] = [];
     for (let y = 0; y < height; y += STEP) {
       for (let x = 0; x < width; x += STEP) {
-        if (blockHasInk(data, width, x, y, STEP, width, height, INK_ALPHA_THRESHOLD)) {
+        if (blockHasInk(data, width, x, y, STEP, width, height, INK_ALPHA_THRESHOLD, INK_MARGIN_PX)) {
           // Convert the wrapper-relative entry point into this canvas's own
           // local space (canvas's local (0,0) sits at wrapper (-PAD,-PAD)).
           const entry = entryWrapper ? { x: entryWrapper.x + PAD, y: entryWrapper.y + PAD } : null;
