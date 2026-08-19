@@ -81,6 +81,11 @@ function lerpColor(a: { r: number; g: number; b: number }, b: { r: number; g: nu
   return `rgb(${Math.round(a.r + (b.r - a.r) * t)}, ${Math.round(a.g + (b.g - a.g) * t)}, ${Math.round(a.b + (b.b - a.b) * t)})`;
 }
 
+// Smoothstep — a simple, cheap ease-in-out for the hand-driven canvas fade.
+function easeInOut(t: number) {
+  return t * t * (3 - 2 * t);
+}
+
 // Guards against building particles from a font-size that's still mid-spring
 // (or a web font that hasn't finished loading yet) — hovering right after
 // page load can otherwise sample a completely wrong size, producing a
@@ -133,6 +138,15 @@ export function ParticleWordmark({
   const cleanupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveStartRef = useRef<number | null>(null);
   const crossfadeStartedRef = useRef(false);
+  // The canvas's own fade in/out is driven by hand (ctx.globalAlpha, applied
+  // every frame in the same loop that already drives everything else)
+  // instead of a native CSS opacity transition. A CSS transition hands the
+  // fade off to the browser's own compositing pipeline, which is the one
+  // part of this whole effect not under direct control — driving it
+  // manually removes that as a variable entirely rather than guessing at
+  // what a given browser's compositor might be doing with it.
+  const enterStartRef = useRef<number | null>(null);
+  const crossfadeStartTimeRef = useRef<number | null>(null);
   const enterTokenRef = useRef(0);
   const [hovered, setHovered] = useState(false);
 
@@ -245,10 +259,25 @@ export function ParticleWordmark({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
+    // The canvas element itself stays at opacity 1 for its whole active
+    // lifetime (set once, no transition) — the actual fade is this alpha,
+    // applied to the drawn pixels directly, every frame, under full control.
+    canvas.style.opacity = "1";
+
     const colors = colorsRef.current ?? { accent: hexToRgb("#ff6fb0"), foreground: hexToRgb("#ededed") };
     // eslint-disable-next-line react-hooks/purity -- runs inside a requestAnimationFrame callback, never during render
     const now = performance.now();
     const leaveStart = leaveStartRef.current;
+
+    let canvasAlpha = 1;
+    if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
+      const t = Math.min(1, (now - crossfadeStartTimeRef.current) / CROSSFADE_MS);
+      canvasAlpha = 1 - easeInOut(t);
+    } else if (leaveStart == null && enterStartRef.current != null) {
+      const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
+      canvasAlpha = easeInOut(t);
+    }
+    ctx.globalAlpha = canvasAlpha;
     if (leaveStart != null) {
       // Dissolving back to normal: sweep the dot color from pink to the real
       // text color as they settle, so the swap to crisp text reads as the
@@ -311,12 +340,14 @@ export function ParticleWordmark({
       const elapsed = now - leaveStart;
       if ((allSettled && elapsed > SETTLE_MIN_MS) || elapsed > SETTLE_MAX_MS) {
         crossfadeStartedRef.current = true;
+        crossfadeStartTimeRef.current = now;
         setHovered(false);
         cleanupTimeoutRef.current = setTimeout(() => {
           if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
           }
+          if (canvasRef.current) canvasRef.current.style.opacity = "0";
         }, CROSSFADE_MS);
       }
     }
@@ -338,6 +369,7 @@ export function ParticleWordmark({
     }
     leaveStartRef.current = null;
     crossfadeStartedRef.current = false;
+    crossfadeStartTimeRef.current = null;
 
     if (hovered) {
       if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
@@ -368,6 +400,7 @@ export function ParticleWordmark({
     const wrapperRect = wrapperRef.current?.getBoundingClientRect();
     const entry = wrapperRect ? { x: clientX - wrapperRect.left, y: clientY - wrapperRect.top } : null;
     buildParticles(entry);
+    enterStartRef.current = performance.now();
     setHovered(true);
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
   };
@@ -377,7 +410,9 @@ export function ParticleWordmark({
     mouseRef.current = null;
     const leaveNow = performance.now();
     leaveStartRef.current = leaveNow;
+    enterStartRef.current = null;
     crossfadeStartedRef.current = false; // draw() decides when this leave's crossfade actually starts
+    crossfadeStartTimeRef.current = null;
     if (cleanupTimeoutRef.current) {
       clearTimeout(cleanupTimeoutRef.current);
       cleanupTimeoutRef.current = null;
@@ -427,15 +462,14 @@ export function ParticleWordmark({
           </span>
         ))}
       </motion.span>
-      <canvas
-        ref={canvasRef}
-        aria-hidden="true"
-        className="pointer-events-none absolute transition-opacity ease-[cubic-bezier(0.4,0,0.2,1)]"
-        style={{
-          opacity: hovered ? 1 : 0,
-          transitionDuration: `${CROSSFADE_MS}ms`,
-        }}
-      />
+      {/*
+        No CSS opacity/transition here on purpose — the fade is driven
+        entirely by hand in draw() via ctx.globalAlpha, every frame, so it's
+        never subject to the browser's own compositing timing for this
+        transition. React only sets the initial hidden state; draw() and the
+        exit cleanup own everything after that.
+      */}
+      <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute" style={{ opacity: 0 }} />
     </span>
   );
 }
