@@ -164,7 +164,6 @@ export function ParticleWordmark({
   const colorsRef = useRef<{ accent: { r: number; g: number; b: number }; foreground: { r: number; g: number; b: number } } | null>(
     null,
   );
-  const cleanupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveStartRef = useRef<number | null>(null);
   const crossfadeStartedRef = useRef(false);
   // The canvas's own fade in/out is driven by hand (ctx.globalAlpha, applied
@@ -342,10 +341,12 @@ export function ParticleWordmark({
     // longer cares where the dots physically are — it draws the correct
     // shape on a guaranteed schedule regardless.
     let solidifyT = 0;
+    let exitJustFinished = false;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const t = Math.min(1, (now - crossfadeStartTimeRef.current) / CROSSFADE_MS);
       canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(t));
       solidifyT = Math.min(1, t / SOLIDIFY_FRACTION);
+      exitJustFinished = t >= 1;
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
       const start = entranceStartAlphaRef.current;
@@ -430,21 +431,35 @@ export function ParticleWordmark({
     }
     ctx.restore();
 
+    // Hide the canvas and stop the loop from right here, driven by the same
+    // clock (now vs crossfadeStartTimeRef) that just computed this frame's
+    // alpha — not a separately-scheduled setTimeout. A setTimeout runs on
+    // its own clock (it isn't paused when a tab is backgrounded the way rAF
+    // is), so it isn't actually guaranteed to fire at the same moment this
+    // loop considers the fade done; a canvas hidden or left visible out of
+    // step with what it last actually drew is exactly the kind of thing
+    // that could freeze a stale frame in view. Ending things here removes
+    // that second clock entirely.
+    if (exitJustFinished) {
+      canvas.style.opacity = "0";
+      if (textRef.current) textRef.current.style.opacity = "";
+      crossfadeStartedRef.current = false;
+      crossfadeStartTimeRef.current = null;
+      leaveStartRef.current = null;
+      rafRef.current = null;
+      return;
+    }
+
     rafRef.current = requestAnimationFrame(draw);
   };
 
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (cleanupTimeoutRef.current) clearTimeout(cleanupTimeoutRef.current);
     };
   }, []);
 
   const handleEnter = async (e: ReactMouseEvent<HTMLSpanElement>) => {
-    if (cleanupTimeoutRef.current) {
-      clearTimeout(cleanupTimeoutRef.current);
-      cleanupTimeoutRef.current = null;
-    }
     leaveStartRef.current = null;
     crossfadeStartedRef.current = false;
     crossfadeStartTimeRef.current = null;
@@ -499,15 +514,9 @@ export function ParticleWordmark({
     crossfadeStartedRef.current = true;
     crossfadeStartTimeRef.current = leaveNow;
     setHovered(false);
-    if (cleanupTimeoutRef.current) clearTimeout(cleanupTimeoutRef.current);
-    cleanupTimeoutRef.current = setTimeout(() => {
-      if (rafRef.current) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      if (canvasRef.current) canvasRef.current.style.opacity = "0";
-      if (textRef.current) textRef.current.style.opacity = "";
-    }, CROSSFADE_MS);
+    // No setTimeout here — draw() hides the canvas and stops itself once the
+    // fade it's actually rendering reaches the end (see exitJustFinished).
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
     // Particles get a staggered wake-up delay so the entrance looks like it's
     // assembling rather than popping in — but if you leave before a
     // far-off particle's delay has elapsed (eg. hovering only briefly), it's
