@@ -50,6 +50,11 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550;
 const CROSSFADE_EASE = [0.4, 0, 0.2, 1] as const; // smooth, evenly-paced ease — not front-loaded
+// Fraction of the crossfade window spent resolving the scattered dots into
+// a perfect solid raster (see rasterRef below). Deliberately short — the
+// point is to get to a gap-free image fast and hold it there while the
+// whole canvas fades out into the real text.
+const SOLIDIFY_FRACTION = 0.35;
 
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
@@ -139,6 +144,16 @@ export function ParticleWordmark({
   const textRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
+  // A retina-resolution, fully anti-aliased rendering of the current text —
+  // the exact same fillText() call the particle grid is sampled from, kept
+  // around (not discarded) so the exit animation can draw it directly
+  // instead of relying on the particle grid to reconstruct the letterform.
+  // The particle grid is a sparse point-sample of this image; it's great for
+  // a scattering dot effect but was never guaranteed to have zero gaps at
+  // every thin stroke, and every gap it did have showed up right as it
+  // resolved into "solid" — exactly where it's most noticeable. Drawing the
+  // real image instead of the reconstruction removes that whole bug class.
+  const rasterRef = useRef<HTMLCanvasElement | null>(null);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
   // getComputedStyle forces a style recalc, and hex parsing is needless
@@ -235,6 +250,26 @@ export function ParticleWordmark({
     lines.forEach((line, i) => octx.fillText(line, PAD, baselines[i]));
 
     const { data } = octx.getImageData(0, 0, width, height);
+
+    // Same text, same fontSpec, same baselines — rendered again at native
+    // pixel density purely so the exit animation has a crisp, gap-free image
+    // to draw instead of leaning on the particle grid. Kept in a ref (not
+    // discarded like a scratch canvas) since it's needed for the whole
+    // lifetime of this hover session, not just at build time.
+    const raster = document.createElement("canvas");
+    raster.width = width * dpr;
+    raster.height = height * dpr;
+    const rctx = raster.getContext("2d");
+    if (rctx) {
+      rctx.scale(dpr, dpr);
+      rctx.fillStyle = "#fff";
+      rctx.font = fontSpec;
+      rctx.textBaseline = "alphabetic";
+      rctx.letterSpacing = computed.letterSpacing;
+      lines.forEach((line, i) => rctx.fillText(line, PAD, baselines[i]));
+    }
+    rasterRef.current = raster;
+
     const now = performance.now();
     const points: Particle[] = [];
     for (let y = 0; y < height; y += STEP) {
@@ -283,32 +318,48 @@ export function ParticleWordmark({
     const leaveStart = leaveStartRef.current;
 
     let canvasAlpha = 1;
+    // How far into the exit crossfade the scattered dots have resolved into
+    // the perfect solid raster (see rasterRef) — 0 = still all dots, 1 = the
+    // raster is fully opaque and the dots have faded out completely under
+    // it. Deliberately reaches 1 well before canvasAlpha reaches 0, so the
+    // whole rest of the crossfade is just a gap-free image dissolving into
+    // the real DOM text, not the dot reconstruction.
+    let solidifyT = 0;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const t = Math.min(1, (now - crossfadeStartTimeRef.current) / CROSSFADE_MS);
       canvasAlpha = 1 - easeInOut(t);
+      solidifyT = Math.min(1, t / SOLIDIFY_FRACTION);
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
       canvasAlpha = easeInOut(t);
     }
-    ctx.globalAlpha = canvasAlpha;
+    let fillColor: string;
     if (leaveStart != null) {
       // Dissolving back to normal: sweep the dot color from pink to the real
       // text color as they settle, so the swap to crisp text reads as the
       // particles turning solid rather than two mismatched layers cutting over.
       const t = Math.min(1, (now - leaveStart) / SETTLE_MIN_MS);
-      ctx.fillStyle = lerpColor(colors.accent, colors.foreground, t);
+      fillColor = lerpColor(colors.accent, colors.foreground, t);
     } else {
-      ctx.fillStyle = `rgb(${colors.accent.r}, ${colors.accent.g}, ${colors.accent.b})`;
+      fillColor = `rgb(${colors.accent.r}, ${colors.accent.g}, ${colors.accent.b})`;
     }
+    ctx.fillStyle = fillColor;
 
     const mouse = mouseRef.current;
     let allSettled = true;
+    // Dots fade out as the raster fades in (see below) — skip the whole pass
+    // once they're fully invisible rather than paying for thousands of
+    // arc()/fill() calls that would draw at zero opacity anyway.
+    const dotsVisible = solidifyT < 1;
     // One shared path for every particle, filled once at the end — all
     // particles are the same color in a given frame anyway, so a separate
     // beginPath/arc/fill per particle (thousands of individual fill() calls
     // per frame at this density) was pure overhead, not needed for
     // correctness. Likely the actual source of the reported lag.
-    ctx.beginPath();
+    if (dotsVisible) {
+      ctx.globalAlpha = canvasAlpha * (1 - solidifyT);
+      ctx.beginPath();
+    }
     for (const p of particlesRef.current) {
       const awake = now >= p.wakeAt;
       if (awake) {
@@ -338,10 +389,28 @@ export function ParticleWordmark({
         allSettled = false;
       }
 
-      ctx.moveTo(p.x + DOT_RADIUS, p.y);
-      ctx.arc(p.x, p.y, DOT_RADIUS, 0, Math.PI * 2);
+      if (dotsVisible) {
+        ctx.moveTo(p.x + DOT_RADIUS, p.y);
+        ctx.arc(p.x, p.y, DOT_RADIUS, 0, Math.PI * 2);
+      }
     }
-    ctx.fill();
+    if (dotsVisible) ctx.fill();
+
+    // Once the dots have (mostly) resolved, draw the real rasterized text
+    // directly on top instead of continuing to rely on the dot grid — this
+    // is the exact same image the particles were sampled from, at full
+    // resolution, so it has no coverage gaps by construction. drawImage
+    // paints it in white-on-transparent; source-in then recolors only the
+    // pixels it actually drew (its real anti-aliased shape) to the current
+    // sweep color, without touching anything outside that shape.
+    if (solidifyT > 0 && rasterRef.current) {
+      ctx.globalAlpha = canvasAlpha * solidifyT;
+      ctx.drawImage(rasterRef.current, 0, 0, width, height);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+    }
     ctx.restore();
 
     // Only crossfade to real text once the shape has actually reformed, not
