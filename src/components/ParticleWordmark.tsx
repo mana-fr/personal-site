@@ -34,9 +34,6 @@ const ENTRANCE_WINDOW_MS = 620; // how long after waking a particle uses the slo
 const EXIT_SPRING = 0.015; // slow spring while dissolving back to text — unhurried gather-home
 const DAMPING = 0.8;
 const DOT_RADIUS = 1.15;
-const SETTLE_MIN_MS = 350; // minimum gather + color-sweep time before the crossfade may start
-const SETTLE_MAX_MS = 1400; // safety cap — crossfade starts even if something never fully converges
-const SETTLE_EPSILON_PX = 2.5; // how close to home counts as "arrived" for exit-convergence purposes
 const BURST_JITTER = 22; // px of random scatter around the cursor's entry point
 const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // How far each particle starts from its own home, as a fraction of the way
@@ -49,12 +46,16 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // "assembling from where you hovered" feel for nearby ones.
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550;
-const CROSSFADE_EASE = [0.4, 0, 0.2, 1] as const; // smooth, evenly-paced ease — not front-loaded
 // Fraction of the crossfade window spent resolving the scattered dots into
 // a perfect solid raster (see rasterRef below). Deliberately short — the
 // point is to get to a gap-free image fast and hold it there while the
 // whole canvas fades out into the real text.
 const SOLIDIFY_FRACTION = 0.35;
+// The color sweep (pink -> real text color) completes over this same short
+// window, so the raster settles into its final color right as it becomes
+// the only thing on screen — not still shifting hue for the rest of the
+// (much longer) fade-out.
+const SWEEP_MS = CROSSFADE_MS * SOLIDIFY_FRACTION;
 
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
@@ -175,6 +176,14 @@ export function ParticleWordmark({
   // what a given browser's compositor might be doing with it.
   const enterStartRef = useRef<number | null>(null);
   const crossfadeStartTimeRef = useRef<number | null>(null);
+  // canvasAlphaRef mirrors, every frame, whatever alpha draw() last actually
+  // used — so if the user leaves mid-entrance (canvas still fading in), the
+  // exit fade can continue smoothly from wherever it really was instead of
+  // jumping to fully opaque first. crossfadeStartAlphaRef freezes that value
+  // at the instant the exit begins, as the fade-out's starting point.
+  const canvasAlphaRef = useRef(0);
+  const crossfadeStartAlphaRef = useRef(1);
+  const entranceStartAlphaRef = useRef(0); // same idea, for entering mid-exit-fade
   const enterTokenRef = useRef(0);
   const [hovered, setHovered] = useState(false);
 
@@ -321,32 +330,46 @@ export function ParticleWordmark({
     // How far into the exit crossfade the scattered dots have resolved into
     // the perfect solid raster (see rasterRef) — 0 = still all dots, 1 = the
     // raster is fully opaque and the dots have faded out completely under
-    // it. Deliberately reaches 1 well before canvasAlpha reaches 0, so the
-    // whole rest of the crossfade is just a gap-free image dissolving into
-    // the real DOM text, not the dot reconstruction.
+    // it. Reaches 1 well before canvasAlpha reaches 0, so the whole rest of
+    // the crossfade is just a gap-free image dissolving into the real DOM
+    // text, never the dot reconstruction — and it starts the instant you
+    // leave, on a fixed clock, rather than waiting for the particle physics
+    // to visibly settle first. Gating it on physics convergence meant its
+    // start time depended on real-time frame delivery: a particle still
+    // catching up from repulsion could still be short of home right as a
+    // timeout forced the crossfade to start anyway, which is what read as
+    // a piece of the letterform vanishing and popping back. Solidify no
+    // longer cares where the dots physically are — it draws the correct
+    // shape on a guaranteed schedule regardless.
     let solidifyT = 0;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const t = Math.min(1, (now - crossfadeStartTimeRef.current) / CROSSFADE_MS);
-      canvasAlpha = 1 - easeInOut(t);
+      canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(t));
       solidifyT = Math.min(1, t / SOLIDIFY_FRACTION);
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
-      canvasAlpha = easeInOut(t);
+      const start = entranceStartAlphaRef.current;
+      canvasAlpha = start + (1 - start) * easeInOut(t);
     }
+    canvasAlphaRef.current = canvasAlpha;
     let fillColor: string;
     if (leaveStart != null) {
       // Dissolving back to normal: sweep the dot color from pink to the real
-      // text color as they settle, so the swap to crisp text reads as the
-      // particles turning solid rather than two mismatched layers cutting over.
-      const t = Math.min(1, (now - leaveStart) / SETTLE_MIN_MS);
+      // text color right away, so the raster settles into its final color
+      // early — same fixed clock as solidifyT, not gated on physics either.
+      const t = Math.min(1, (now - leaveStart) / SWEEP_MS);
       fillColor = lerpColor(colors.accent, colors.foreground, t);
     } else {
       fillColor = `rgb(${colors.accent.r}, ${colors.accent.g}, ${colors.accent.b})`;
     }
     ctx.fillStyle = fillColor;
 
+    // Forced to be the exact complement of canvasAlpha (not its own eased
+    // timeline) so the two can never both be partially faded at once — see
+    // the comment on the JSX below for why that mattered.
+    if (textRef.current) textRef.current.style.opacity = String(1 - canvasAlpha);
+
     const mouse = mouseRef.current;
-    let allSettled = true;
     // Dots fade out as the raster fades in (see below) — skip the whole pass
     // once they're fully invisible rather than paying for thousands of
     // arc()/fill() calls that would draw at zero opacity anyway.
@@ -377,17 +400,11 @@ export function ParticleWordmark({
           leaveStart != null ? EXIT_SPRING : now - p.wakeAt < ENTRANCE_WINDOW_MS ? ENTRANCE_SPRING : SPRING;
         p.vx += (p.homeX - p.x) * springK;
         p.vy += (p.homeY - p.y) * springK;
-      } else {
-        allSettled = false;
       }
       p.vx *= DAMPING;
       p.vy *= DAMPING;
       p.x += p.vx;
       p.y += p.vy;
-
-      if (leaveStart != null && (Math.abs(p.x - p.homeX) > SETTLE_EPSILON_PX || Math.abs(p.y - p.homeY) > SETTLE_EPSILON_PX)) {
-        allSettled = false;
-      }
 
       if (dotsVisible) {
         ctx.moveTo(p.x + DOT_RADIUS, p.y);
@@ -412,27 +429,6 @@ export function ParticleWordmark({
       ctx.globalCompositeOperation = "source-over";
     }
     ctx.restore();
-
-    // Only crossfade to real text once the shape has actually reformed, not
-    // after a guessed fixed delay. A fixed timeout could let the crossfade
-    // start while some particles — displaced by repulsion right before you
-    // left — are still visibly catching up, which reads as a piece of the
-    // letterform vanishing and popping back once it finally arrives.
-    if (leaveStart != null && !crossfadeStartedRef.current) {
-      const elapsed = now - leaveStart;
-      if ((allSettled && elapsed > SETTLE_MIN_MS) || elapsed > SETTLE_MAX_MS) {
-        crossfadeStartedRef.current = true;
-        crossfadeStartTimeRef.current = now;
-        setHovered(false);
-        cleanupTimeoutRef.current = setTimeout(() => {
-          if (rafRef.current) {
-            cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-          }
-          if (canvasRef.current) canvasRef.current.style.opacity = "0";
-        }, CROSSFADE_MS);
-      }
-    }
 
     rafRef.current = requestAnimationFrame(draw);
   };
@@ -482,6 +478,7 @@ export function ParticleWordmark({
     const wrapperRect = wrapperRef.current?.getBoundingClientRect();
     const entry = wrapperRect ? { x: clientX - wrapperRect.left, y: clientY - wrapperRect.top } : null;
     buildParticles(entry);
+    entranceStartAlphaRef.current = canvasAlphaRef.current;
     enterStartRef.current = performance.now();
     setHovered(true);
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(draw);
@@ -493,19 +490,33 @@ export function ParticleWordmark({
     const leaveNow = performance.now();
     leaveStartRef.current = leaveNow;
     enterStartRef.current = null;
-    crossfadeStartedRef.current = false; // draw() decides when this leave's crossfade actually starts
-    crossfadeStartTimeRef.current = null;
-    if (cleanupTimeoutRef.current) {
-      clearTimeout(cleanupTimeoutRef.current);
-      cleanupTimeoutRef.current = null;
-    }
+    // The exit crossfade starts immediately, on a fixed CROSSFADE_MS clock —
+    // not once the particle physics happens to visibly converge. Starting
+    // from wherever the canvas's own fade-in currently is (not a hard 1)
+    // means leaving mid-entrance dissolves smoothly instead of popping to
+    // full opacity first.
+    crossfadeStartAlphaRef.current = canvasAlphaRef.current;
+    crossfadeStartedRef.current = true;
+    crossfadeStartTimeRef.current = leaveNow;
+    setHovered(false);
+    if (cleanupTimeoutRef.current) clearTimeout(cleanupTimeoutRef.current);
+    cleanupTimeoutRef.current = setTimeout(() => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      if (canvasRef.current) canvasRef.current.style.opacity = "0";
+      if (textRef.current) textRef.current.style.opacity = "";
+    }, CROSSFADE_MS);
     // Particles get a staggered wake-up delay so the entrance looks like it's
     // assembling rather than popping in — but if you leave before a
     // far-off particle's delay has elapsed (eg. hovering only briefly), it's
     // still frozen at its spawn point. Left alone, it wakes up naturally
     // mid-exit and visibly snaps into motion — a stray "leftover" cluster
     // that suddenly jumps. Force everyone awake now so the gather-home is
-    // uniform regardless of how long the hover lasted.
+    // uniform regardless of how long the hover lasted. This no longer gates
+    // anything about the crossfade's timing (that's fixed now), it's purely
+    // so the decorative dot-scatter itself looks coherent.
     for (const p of particlesRef.current) {
       if (p.wakeAt > leaveNow) p.wakeAt = leaveNow;
     }
@@ -526,16 +537,22 @@ export function ParticleWordmark({
       onMouseLeave={handleLeave}
       onMouseMove={handleMove}
     >
+      {/*
+        Opacity is intentionally NOT animated here. It used to be driven by
+        framer-motion on its own timeline (a separate easing curve from the
+        canvas's hand-driven fade), which meant the two fades were only ever
+        approximately complementary, not exactly — at some point mid-crossfade
+        their opacities could both dip below what they'd sum to at either
+        end, and a thin stroke (the "j" tail) could drop under visibility for
+        a frame or two before climbing back. draw() now sets this element's
+        opacity directly, every frame, to exactly 1 minus the canvas's own
+        alpha — the two are mathematically forced to always sum to 1, so
+        there's no instant where the combined ink is thinner than intended.
+      */}
       <motion.span
         ref={textRef}
-        animate={{
-          fontSize,
-          opacity: hovered ? 0 : 1,
-        }}
-        transition={{
-          fontSize: { type: "spring", stiffness: 140, damping: 16, mass: 0.7 },
-          opacity: { duration: CROSSFADE_MS / 1000, ease: CROSSFADE_EASE },
-        }}
+        animate={{ fontSize }}
+        transition={{ fontSize: { type: "spring", stiffness: 140, damping: 16, mass: 0.7 } }}
         className="font-display block origin-top-left select-none italic leading-[1.08] tracking-tight text-foreground"
       >
         {lines.map((line) => (
