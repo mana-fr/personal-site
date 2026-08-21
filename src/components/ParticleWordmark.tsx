@@ -46,24 +46,21 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // "assembling from where you hovered" feel for nearby ones.
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550; // entrance fade-in duration (dots appearing, real text fading out)
-// The exit is split into two distinct phases rather than one long fade. The
-// real DOM text is held at full opacity for BOTH phases (see the
-// textOpacity comment in draw()), never cross-dissolving with the canvas:
-//   1. SOLIDIFY_MS: canvas stays fully opaque (covering the always-opaque
-//      real text underneath) while dots resolve into the raster (see
-//      rasterRef) and its color sweeps to the final text color.
-//   2. REVEAL_MS: the now-solid raster fades away, uncovering the real text
-//      that was already fully there underneath the whole time. Canvas text
-//      shaping and DOM text shaping aren't guaranteed to agree to the pixel,
-//      especially for a hairline stroke, across browsers — a real
-//      cross-dissolve between two not-quite-aligned copies can sum to less
-//      than full coverage right where they disagree. Fading only the
-//      (non-authoritative) canvas layer over ground truth that's always
-//      fully there avoids that regardless of how short or long this phase
-//      is; it's still kept short just to bound how long the raster's own
-//      ghost is visible on top.
+// The exit has no fade-out at all — it's an instant cut. The canvas (dots
+// resolving into the raster, see rasterRef, over SOLIDIFY_MS) stays fully
+// opaque the entire time, covering the real DOM text that's already fully
+// opaque underneath the whole time too (see the textOpacity comment in
+// draw()); then, the instant SOLIDIFY_MS elapses, the canvas just vanishes.
+// An earlier version faded the raster away over a separate REVEAL_MS
+// window instead of cutting — that was the last surviving source of a
+// glitch: canvas text shaping and the DOM's own don't always land on
+// identical pixels at a hairline stroke, and fading between two
+// not-quite-aligned copies over 100+ms doesn't hide that mismatch, it
+// stretches it into a visible shimmer for the whole fade. Cutting instead
+// of fading bounds the exposure to whatever mismatch exists to a single,
+// unavoidable frame — the shortest it can possibly be — rather than
+// drawing it out.
 const SOLIDIFY_MS = 190;
-const REVEAL_MS = 160;
 
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
@@ -358,36 +355,19 @@ export function ParticleWordmark({
     // How far the scattered dots have resolved into the perfect solid raster
     // (see rasterRef) — 0 = still all dots, 1 = the raster is fully opaque
     // and now completely covers the (still fully-opaque underneath) dots.
-    // This completes entirely within SOLIDIFY_MS, during which canvasAlpha
-    // stays at whatever it was (not yet fading toward the real text) — see
-    // the SOLIDIFY_MS/REVEAL_MS comment above for why these are kept
-    // separate.
     let solidifyT = 0;
     let exitJustFinished = false;
-    // Held at full strength for the ENTIRE exit — not just the reveal half —
-    // rather than the complementary "1 - canvasAlpha" rule used elsewhere.
-    // It used to switch to this only once the reveal phase began, which
-    // meant it jumped from "1 - canvasAlpha" (≈0, since canvas is ≈fully
-    // opaque throughout solidify) straight to 1 in a single frame right at
-    // the solidify→reveal boundary. Canvas alpha itself is continuous across
-    // that same boundary, so nothing about the visible canvas layer changes
-    // there — but if the raster and the real DOM text aren't pixel-identical
-    // at that exact instant (a hairline stroke can genuinely differ by a px
-    // between canvas text shaping and the browser's own), that one-frame
-    // opacity jump is exactly long enough to flash the mismatch. Holding
-    // text at 1 from the moment the exit starts (not just once reveal
-    // begins) makes it a constant for the whole exit — nothing to jump to.
+    // Held at full strength for the entire exit (not the complementary
+    // "1 - canvasAlpha" used elsewhere) — see the JSX comment for why.
     const textOpacity = leaveStart != null ? 1 : null;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const elapsed = now - crossfadeStartTimeRef.current;
       solidifyT = Math.min(1, elapsed / SOLIDIFY_MS);
-      if (elapsed <= SOLIDIFY_MS) {
-        canvasAlpha = crossfadeStartAlphaRef.current;
-      } else {
-        const revealT = Math.min(1, (elapsed - SOLIDIFY_MS) / REVEAL_MS);
-        canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(revealT));
-        exitJustFinished = revealT >= 1;
-      }
+      // No fade-out branch here on purpose — see the SOLIDIFY_MS comment
+      // above for why this is a cut, not a crossfade. canvasAlpha simply
+      // holds at whatever it started from until the instant this ends.
+      canvasAlpha = crossfadeStartAlphaRef.current;
+      exitJustFinished = elapsed >= SOLIDIFY_MS;
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
       const start = entranceStartAlphaRef.current;
@@ -397,9 +377,8 @@ export function ParticleWordmark({
     let fillColor: string;
     if (leaveStart != null) {
       // Dissolving back to normal: sweep the dot color from pink to the real
-      // text color right away, so the raster settles into its final color
-      // before the reveal phase starts (not still shifting hue while it's
-      // fading into the real text).
+      // text color over the same window the shape itself solidifies in, so
+      // both finish together right as the cut to real text happens.
       const t = Math.min(1, (now - leaveStart) / SOLIDIFY_MS);
       fillColor = lerpColor(colors.accent, colors.foreground, t);
     } else {
