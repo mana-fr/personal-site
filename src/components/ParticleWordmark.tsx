@@ -46,21 +46,22 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // "assembling from where you hovered" feel for nearby ones.
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550; // entrance fade-in duration (dots appearing, real text fading out)
-// The exit is split into two distinct phases rather than one long fade:
-//   1. SOLIDIFY_MS: canvas stays fully opaque while dots resolve into the
-//      raster (see rasterRef) and its color sweeps to the final text color.
-//      Nothing overlaps with the real text yet.
-//   2. REVEAL_MS: the now-solid raster fades away on top of the real text,
-//      which is held at full opacity underneath for this whole phase (see
-//      the textOpacity comment in draw()) rather than cross-dissolving both.
-//      Canvas text shaping and DOM text shaping aren't guaranteed to agree
-//      to the pixel, especially for a hairline stroke, across browsers — a
-//      real cross-dissolve between two not-quite-aligned copies can sum to
-//      less than full coverage right where they disagree. Fading only the
-//      (non-authoritative) canvas layer over the always-fully-opaque real
-//      text avoids that regardless of how short or long this phase is; it's
-//      still kept short just to bound how long the raster's own ghost is
-//      visible on top.
+// The exit is split into two distinct phases rather than one long fade. The
+// real DOM text is held at full opacity for BOTH phases (see the
+// textOpacity comment in draw()), never cross-dissolving with the canvas:
+//   1. SOLIDIFY_MS: canvas stays fully opaque (covering the always-opaque
+//      real text underneath) while dots resolve into the raster (see
+//      rasterRef) and its color sweeps to the final text color.
+//   2. REVEAL_MS: the now-solid raster fades away, uncovering the real text
+//      that was already fully there underneath the whole time. Canvas text
+//      shaping and DOM text shaping aren't guaranteed to agree to the pixel,
+//      especially for a hairline stroke, across browsers — a real
+//      cross-dissolve between two not-quite-aligned copies can sum to less
+//      than full coverage right where they disagree. Fading only the
+//      (non-authoritative) canvas layer over ground truth that's always
+//      fully there avoids that regardless of how short or long this phase
+//      is; it's still kept short just to bound how long the raster's own
+//      ghost is visible on top.
 const SOLIDIFY_MS = 190;
 const REVEAL_MS = 160;
 
@@ -363,9 +364,20 @@ export function ParticleWordmark({
     // separate.
     let solidifyT = 0;
     let exitJustFinished = false;
-    // Defaults to the complementary rule below; the reveal branch overrides
-    // it to hold the real text at full strength instead (see that branch).
-    let textOpacity: number | null = null;
+    // Held at full strength for the ENTIRE exit — not just the reveal half —
+    // rather than the complementary "1 - canvasAlpha" rule used elsewhere.
+    // It used to switch to this only once the reveal phase began, which
+    // meant it jumped from "1 - canvasAlpha" (≈0, since canvas is ≈fully
+    // opaque throughout solidify) straight to 1 in a single frame right at
+    // the solidify→reveal boundary. Canvas alpha itself is continuous across
+    // that same boundary, so nothing about the visible canvas layer changes
+    // there — but if the raster and the real DOM text aren't pixel-identical
+    // at that exact instant (a hairline stroke can genuinely differ by a px
+    // between canvas text shaping and the browser's own), that one-frame
+    // opacity jump is exactly long enough to flash the mismatch. Holding
+    // text at 1 from the moment the exit starts (not just once reveal
+    // begins) makes it a constant for the whole exit — nothing to jump to.
+    const textOpacity = leaveStart != null ? 1 : null;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const elapsed = now - crossfadeStartTimeRef.current;
       solidifyT = Math.min(1, elapsed / SOLIDIFY_MS);
@@ -375,18 +387,6 @@ export function ParticleWordmark({
         const revealT = Math.min(1, (elapsed - SOLIDIFY_MS) / REVEAL_MS);
         canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(revealT));
         exitJustFinished = revealT >= 1;
-        // Reveal fades the (now-solid) canvas raster away on top of the real
-        // text, rather than cross-dissolving both at once. The raster and the
-        // DOM text are two independently-shaped renders of the same glyphs
-        // (canvas fillText vs. the browser's own text layout) — at a hairline
-        // stroke like the "j" tail they don't always land on the exact same
-        // pixels, so fading both simultaneously (each at partial opacity) can
-        // sum to less than full coverage right where they disagree, which
-        // reads as the tail glitching or cutting out mid-transition. Holding
-        // the real text at full opacity the whole time removes that risk:
-        // the canvas is just a fading overlay on top of ground truth that's
-        // already fully there, so visible ink never drops below 100%.
-        textOpacity = 1;
       }
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
@@ -407,10 +407,10 @@ export function ParticleWordmark({
     }
     ctx.fillStyle = fillColor;
 
-    // Outside the reveal phase, forced to be the exact complement of
-    // canvasAlpha (not its own eased timeline) so the two can never both be
-    // partially faded at once — see the comment on the JSX below for why
-    // that mattered.
+    // Held at 1 for the whole exit (see textOpacity above); otherwise
+    // (entrance / idle) forced to be the exact complement of canvasAlpha —
+    // not its own eased timeline — so the two can never both be partially
+    // faded at once. See the comment on the JSX below for why that mattered.
     if (textRef.current) textRef.current.style.opacity = String(textOpacity ?? 1 - canvasAlpha);
 
     const mouse = mouseRef.current;
