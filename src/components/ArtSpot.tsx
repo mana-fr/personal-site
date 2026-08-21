@@ -29,7 +29,13 @@ export function ArtSpot({
     <motion.div
       className={`pointer-events-none absolute select-none text-foreground/0 ${className}`}
       style={{ width: size, height: size }}
-      initial={{ opacity: 0, scale: 0.85, rotate: rotate - 4 }}
+      // color is given explicitly here (not left for Motion to sniff from
+      // the class above) because Tailwind compiles that /0 opacity modifier
+      // via oklab() color-mix, and Motion's color interpolator can't parse
+      // that format as a starting point — it would throw "is not an
+      // animatable color" and silently fail to animate at all. This way
+      // Motion tracks its own starting value and never needs to read it.
+      initial={{ opacity: 0, scale: 0.85, rotate: rotate - 4, color: "var(--muted)" }}
       whileInView={{ opacity: 1, scale: 1, rotate, color: "var(--muted)" }}
       whileHover={{ opacity: 1, scale: 1.08, color: "var(--accent)" }}
       viewport={{ once: false, margin: "-10% 0px -10% 0px" }}

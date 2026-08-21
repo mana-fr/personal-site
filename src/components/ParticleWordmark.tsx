@@ -46,23 +46,21 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // "assembling from where you hovered" feel for nearby ones.
 const ENTRY_PULL = 0.55;
 const CROSSFADE_MS = 550; // entrance fade-in duration (dots appearing, real text fading out)
-// The exit is split into two distinct phases rather than one long fade,
-// specifically to minimize how long the canvas raster and the real DOM text
-// are ever BOTH partially visible at once:
+// The exit is split into two distinct phases rather than one long fade:
 //   1. SOLIDIFY_MS: canvas stays fully opaque while dots resolve into the
 //      raster (see rasterRef) and its color sweeps to the final text color.
 //      Nothing overlaps with the real text yet.
-//   2. REVEAL_MS: a short, fast crossfade from the now-solid raster to the
-//      real text. This is the only window where both are visible at once —
-//      if the canvas's rendering of the glyphs isn't pixel-identical to the
-//      DOM's own (a small but real risk: canvas text shaping and DOM text
-//      shaping aren't guaranteed to agree to the pixel, especially across
-//      browsers), a longer overlap window makes that mismatch more visible
-//      as a brief double-image/ghosting right where the two don't quite
-//      line up. Keeping this phase short bounds how long that's exposed for,
-//      rather than trying to guarantee a pixel-perfect match that a slower
-//      fade can't actually buy anyway — the misalignment, if any, is fixed
-//      and doesn't improve by fading slower.
+//   2. REVEAL_MS: the now-solid raster fades away on top of the real text,
+//      which is held at full opacity underneath for this whole phase (see
+//      the textOpacity comment in draw()) rather than cross-dissolving both.
+//      Canvas text shaping and DOM text shaping aren't guaranteed to agree
+//      to the pixel, especially for a hairline stroke, across browsers — a
+//      real cross-dissolve between two not-quite-aligned copies can sum to
+//      less than full coverage right where they disagree. Fading only the
+//      (non-authoritative) canvas layer over the always-fully-opaque real
+//      text avoids that regardless of how short or long this phase is; it's
+//      still kept short just to bound how long the raster's own ghost is
+//      visible on top.
 const SOLIDIFY_MS = 190;
 const REVEAL_MS = 160;
 
@@ -337,12 +335,16 @@ export function ParticleWordmark({
     let canvasAlpha = 1;
     // How far the scattered dots have resolved into the perfect solid raster
     // (see rasterRef) — 0 = still all dots, 1 = the raster is fully opaque
-    // and the dots have faded out completely under it. This completes
-    // entirely within SOLIDIFY_MS, during which canvasAlpha stays at
-    // whatever it was (not yet fading toward the real text) — see the
-    // SOLIDIFY_MS/REVEAL_MS comment above for why these are kept separate.
+    // and now completely covers the (still fully-opaque underneath) dots.
+    // This completes entirely within SOLIDIFY_MS, during which canvasAlpha
+    // stays at whatever it was (not yet fading toward the real text) — see
+    // the SOLIDIFY_MS/REVEAL_MS comment above for why these are kept
+    // separate.
     let solidifyT = 0;
     let exitJustFinished = false;
+    // Defaults to the complementary rule below; the reveal branch overrides
+    // it to hold the real text at full strength instead (see that branch).
+    let textOpacity: number | null = null;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
       const elapsed = now - crossfadeStartTimeRef.current;
       solidifyT = Math.min(1, elapsed / SOLIDIFY_MS);
@@ -352,6 +354,18 @@ export function ParticleWordmark({
         const revealT = Math.min(1, (elapsed - SOLIDIFY_MS) / REVEAL_MS);
         canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(revealT));
         exitJustFinished = revealT >= 1;
+        // Reveal fades the (now-solid) canvas raster away on top of the real
+        // text, rather than cross-dissolving both at once. The raster and the
+        // DOM text are two independently-shaped renders of the same glyphs
+        // (canvas fillText vs. the browser's own text layout) — at a hairline
+        // stroke like the "j" tail they don't always land on the exact same
+        // pixels, so fading both simultaneously (each at partial opacity) can
+        // sum to less than full coverage right where they disagree, which
+        // reads as the tail glitching or cutting out mid-transition. Holding
+        // the real text at full opacity the whole time removes that risk:
+        // the canvas is just a fading overlay on top of ground truth that's
+        // already fully there, so visible ink never drops below 100%.
+        textOpacity = 1;
       }
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
@@ -372,15 +386,17 @@ export function ParticleWordmark({
     }
     ctx.fillStyle = fillColor;
 
-    // Forced to be the exact complement of canvasAlpha (not its own eased
-    // timeline) so the two can never both be partially faded at once — see
-    // the comment on the JSX below for why that mattered.
-    if (textRef.current) textRef.current.style.opacity = String(1 - canvasAlpha);
+    // Outside the reveal phase, forced to be the exact complement of
+    // canvasAlpha (not its own eased timeline) so the two can never both be
+    // partially faded at once — see the comment on the JSX below for why
+    // that mattered.
+    if (textRef.current) textRef.current.style.opacity = String(textOpacity ?? 1 - canvasAlpha);
 
     const mouse = mouseRef.current;
-    // Dots fade out as the raster fades in (see below) — skip the whole pass
-    // once they're fully invisible rather than paying for thousands of
-    // arc()/fill() calls that would draw at zero opacity anyway.
+    // Dots stay fully opaque for the whole solidify phase (they do NOT fade
+    // out as the raster fades in) — skip the whole pass once the raster is
+    // fully opaque and guaranteed to be covering them anyway, rather than
+    // paying for thousands of arc()/fill() calls that would be invisible.
     const dotsVisible = solidifyT < 1;
     // One shared path for every particle, filled once at the end — all
     // particles are the same color in a given frame anyway, so a separate
@@ -388,7 +404,17 @@ export function ParticleWordmark({
     // per frame at this density) was pure overhead, not needed for
     // correctness. Likely the actual source of the reported lag.
     if (dotsVisible) {
-      ctx.globalAlpha = canvasAlpha * (1 - solidifyT);
+      // Not paired with solidifyT (no "* (1 - solidifyT)" fade-out): a sparse
+      // dot grid fading out in step with an opacity-fading-in raster means,
+      // mid-crossfade, BOTH are only partially opaque — at a hairline stroke
+      // like the "j" tail's thin curl, the sparse dots there can read as
+      // visibly thinner than the tail's true shape even at full alpha, so at
+      // 50/50 the combined coverage briefly dips below what was already
+      // visible before the transition started (the tail flickering out, then
+      // back). Keeping dots at full alpha the whole phase means the raster
+      // fading in on top only ever ADDS coverage, never trades it away —
+      // visible ink can only hold steady or increase, never dip.
+      ctx.globalAlpha = canvasAlpha;
       ctx.beginPath();
     }
     for (const p of particlesRef.current) {
@@ -562,11 +588,23 @@ export function ParticleWordmark({
         end, and a thin stroke (the "j" tail) could drop under visibility for
         a frame or two before climbing back. draw() now sets this element's
         opacity directly, every frame, to exactly 1 minus the canvas's own
-        alpha — the two are mathematically forced to always sum to 1, so
-        there's no instant where the combined ink is thinner than intended.
+        alpha — the two are mathematically forced to always sum to 1.
       */}
       <motion.span
         ref={textRef}
+        // `style` (not just `animate`) matters here: without an explicit
+        // starting value, Motion has to sniff the current fontSize by
+        // reading getComputedStyle() on the DOM node to figure out what to
+        // spring FROM — and that read intermittently came back in a form
+        // Motion couldn't parse ("38.31806" with no unit), throwing
+        // "is not an animatable value" and silently failing to animate at
+        // all. Since buildParticles waits on this exact element's computed
+        // font-size to settle before sampling dot positions, a broken
+        // fontSize spring meant it could sample against a stale/wrong size —
+        // a very plausible source of dots not lining up with the real text.
+        // Providing `style` gives Motion a reliable numeric value directly,
+        // no DOM read required.
+        style={{ fontSize }}
         animate={{ fontSize }}
         transition={{ fontSize: { type: "spring", stiffness: 140, damping: 16, mass: 0.7 } }}
         className="font-display block origin-top-left select-none italic leading-[1.08] tracking-tight text-foreground"
