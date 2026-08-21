@@ -45,17 +45,26 @@ const WAKE_STAGGER_MS = 220; // spread of entrance delays across particles
 // Blending shortens the trip for distant particles without losing the
 // "assembling from where you hovered" feel for nearby ones.
 const ENTRY_PULL = 0.55;
-const CROSSFADE_MS = 550;
-// Fraction of the crossfade window spent resolving the scattered dots into
-// a perfect solid raster (see rasterRef below). Deliberately short — the
-// point is to get to a gap-free image fast and hold it there while the
-// whole canvas fades out into the real text.
-const SOLIDIFY_FRACTION = 0.35;
-// The color sweep (pink -> real text color) completes over this same short
-// window, so the raster settles into its final color right as it becomes
-// the only thing on screen — not still shifting hue for the rest of the
-// (much longer) fade-out.
-const SWEEP_MS = CROSSFADE_MS * SOLIDIFY_FRACTION;
+const CROSSFADE_MS = 550; // entrance fade-in duration (dots appearing, real text fading out)
+// The exit is split into two distinct phases rather than one long fade,
+// specifically to minimize how long the canvas raster and the real DOM text
+// are ever BOTH partially visible at once:
+//   1. SOLIDIFY_MS: canvas stays fully opaque while dots resolve into the
+//      raster (see rasterRef) and its color sweeps to the final text color.
+//      Nothing overlaps with the real text yet.
+//   2. REVEAL_MS: a short, fast crossfade from the now-solid raster to the
+//      real text. This is the only window where both are visible at once —
+//      if the canvas's rendering of the glyphs isn't pixel-identical to the
+//      DOM's own (a small but real risk: canvas text shaping and DOM text
+//      shaping aren't guaranteed to agree to the pixel, especially across
+//      browsers), a longer overlap window makes that mismatch more visible
+//      as a brief double-image/ghosting right where the two don't quite
+//      line up. Keeping this phase short bounds how long that's exposed for,
+//      rather than trying to guarantee a pixel-perfect match that a slower
+//      fade can't actually buy anyway — the misalignment, if any, is fixed
+//      and doesn't improve by fading slower.
+const SOLIDIFY_MS = 190;
+const REVEAL_MS = 160;
 
 // Checks every pixel in a STEP-sized block, not just its corner — a fixed
 // sampling grid can otherwise straddle a thin curved stroke (eg. the tight
@@ -326,27 +335,24 @@ export function ParticleWordmark({
     const leaveStart = leaveStartRef.current;
 
     let canvasAlpha = 1;
-    // How far into the exit crossfade the scattered dots have resolved into
-    // the perfect solid raster (see rasterRef) — 0 = still all dots, 1 = the
-    // raster is fully opaque and the dots have faded out completely under
-    // it. Reaches 1 well before canvasAlpha reaches 0, so the whole rest of
-    // the crossfade is just a gap-free image dissolving into the real DOM
-    // text, never the dot reconstruction — and it starts the instant you
-    // leave, on a fixed clock, rather than waiting for the particle physics
-    // to visibly settle first. Gating it on physics convergence meant its
-    // start time depended on real-time frame delivery: a particle still
-    // catching up from repulsion could still be short of home right as a
-    // timeout forced the crossfade to start anyway, which is what read as
-    // a piece of the letterform vanishing and popping back. Solidify no
-    // longer cares where the dots physically are — it draws the correct
-    // shape on a guaranteed schedule regardless.
+    // How far the scattered dots have resolved into the perfect solid raster
+    // (see rasterRef) — 0 = still all dots, 1 = the raster is fully opaque
+    // and the dots have faded out completely under it. This completes
+    // entirely within SOLIDIFY_MS, during which canvasAlpha stays at
+    // whatever it was (not yet fading toward the real text) — see the
+    // SOLIDIFY_MS/REVEAL_MS comment above for why these are kept separate.
     let solidifyT = 0;
     let exitJustFinished = false;
     if (crossfadeStartedRef.current && crossfadeStartTimeRef.current != null) {
-      const t = Math.min(1, (now - crossfadeStartTimeRef.current) / CROSSFADE_MS);
-      canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(t));
-      solidifyT = Math.min(1, t / SOLIDIFY_FRACTION);
-      exitJustFinished = t >= 1;
+      const elapsed = now - crossfadeStartTimeRef.current;
+      solidifyT = Math.min(1, elapsed / SOLIDIFY_MS);
+      if (elapsed <= SOLIDIFY_MS) {
+        canvasAlpha = crossfadeStartAlphaRef.current;
+      } else {
+        const revealT = Math.min(1, (elapsed - SOLIDIFY_MS) / REVEAL_MS);
+        canvasAlpha = crossfadeStartAlphaRef.current * (1 - easeInOut(revealT));
+        exitJustFinished = revealT >= 1;
+      }
     } else if (leaveStart == null && enterStartRef.current != null) {
       const t = Math.min(1, (now - enterStartRef.current) / CROSSFADE_MS);
       const start = entranceStartAlphaRef.current;
@@ -357,8 +363,9 @@ export function ParticleWordmark({
     if (leaveStart != null) {
       // Dissolving back to normal: sweep the dot color from pink to the real
       // text color right away, so the raster settles into its final color
-      // early — same fixed clock as solidifyT, not gated on physics either.
-      const t = Math.min(1, (now - leaveStart) / SWEEP_MS);
+      // before the reveal phase starts (not still shifting hue while it's
+      // fading into the real text).
+      const t = Math.min(1, (now - leaveStart) / SOLIDIFY_MS);
       fillColor = lerpColor(colors.accent, colors.foreground, t);
     } else {
       fillColor = `rgb(${colors.accent.r}, ${colors.accent.g}, ${colors.accent.b})`;
