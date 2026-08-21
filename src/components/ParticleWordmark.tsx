@@ -162,6 +162,19 @@ export function ParticleWordmark({
   // resolved into "solid" — exactly where it's most noticeable. Drawing the
   // real image instead of the reconstruction removes that whole bug class.
   const rasterRef = useRef<HTMLCanvasElement | null>(null);
+  // Scratch buffer used to tint the raster to the current sweep color (see
+  // the drawImage/source-in/fillRect sequence in draw()) in isolation.
+  // Doing that recolor directly on the MAIN canvas was the actual bug behind
+  // the "tail appears, vanishes, reappears" glitch: Porter-Duff source-in
+  // applies to the canvas's entire existing content, not just the layer you
+  // just drew — so it was also crushing the alpha of the dots already drawn
+  // earlier that same frame down to whatever the raster's own fade-in alpha
+  // happened to be at that instant (near 0 right as the reveal starts),
+  // wiping them out for a moment before recovering. Tinting on an isolated
+  // buffer first, then compositing the already-correct result onto the main
+  // canvas with a plain draw, keeps that operation from ever touching
+  // anything else on screen.
+  const tintScratchRef = useRef<HTMLCanvasElement | null>(null);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
   // getComputedStyle forces a style recalc, and hex parsing is needless
@@ -284,6 +297,14 @@ export function ParticleWordmark({
       lines.forEach((line, i) => rctx.fillText(line, PAD, baselines[i]));
     }
     rasterRef.current = raster;
+
+    // Same size as the raster — reused every frame in draw() to tint it to
+    // the current sweep color in isolation (see the comment on
+    // tintScratchRef above).
+    const tintScratch = document.createElement("canvas");
+    tintScratch.width = width * dpr;
+    tintScratch.height = height * dpr;
+    tintScratchRef.current = tintScratch;
 
     const now = performance.now();
     const points: Particle[] = [];
@@ -450,17 +471,36 @@ export function ParticleWordmark({
     // Once the dots have (mostly) resolved, draw the real rasterized text
     // directly on top instead of continuing to rely on the dot grid — this
     // is the exact same image the particles were sampled from, at full
-    // resolution, so it has no coverage gaps by construction. drawImage
-    // paints it in white-on-transparent; source-in then recolors only the
-    // pixels it actually drew (its real anti-aliased shape) to the current
-    // sweep color, without touching anything outside that shape.
-    if (solidifyT > 0 && rasterRef.current) {
-      ctx.globalAlpha = canvasAlpha * solidifyT;
-      ctx.drawImage(rasterRef.current, 0, 0, width, height);
-      ctx.globalCompositeOperation = "source-in";
-      ctx.fillStyle = fillColor;
-      ctx.fillRect(0, 0, width, height);
-      ctx.globalCompositeOperation = "source-over";
+    // resolution, so it has no coverage gaps by construction.
+    if (solidifyT > 0 && rasterRef.current && tintScratchRef.current) {
+      // Tint the raster to the current sweep color on an ISOLATED scratch
+      // canvas first, not directly on the main canvas. drawImage paints the
+      // raster in white-on-transparent; source-in then recolors only the
+      // pixels it actually drew (its real anti-aliased shape) to fillColor.
+      // Porter-Duff source-in applies to a canvas's ENTIRE existing content,
+      // not just whatever was last drawn onto it — doing this recolor step
+      // directly on the main canvas was crushing the alpha of the dots
+      // already drawn earlier this same frame down to whatever the raster's
+      // own fade-in alpha (canvasAlpha * solidifyT) happened to be, which is
+      // near 0 right as the reveal starts. That's what read as the tail
+      // (and everything else) vanishing right after appearing solid, then
+      // recovering as solidifyT climbed back up. Tinting on its own buffer
+      // means source-in never has anything else on the canvas to crush.
+      const scratch = tintScratchRef.current;
+      const sctx = scratch.getContext("2d");
+      if (sctx) {
+        sctx.save();
+        sctx.scale(dpr, dpr);
+        sctx.clearRect(0, 0, width, height);
+        sctx.drawImage(rasterRef.current, 0, 0, width, height);
+        sctx.globalCompositeOperation = "source-in";
+        sctx.fillStyle = fillColor;
+        sctx.fillRect(0, 0, width, height);
+        sctx.restore();
+
+        ctx.globalAlpha = canvasAlpha * solidifyT;
+        ctx.drawImage(scratch, 0, 0, width, height);
+      }
     }
     ctx.restore();
 
