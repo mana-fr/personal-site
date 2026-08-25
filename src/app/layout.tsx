@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Bodoni_Moda, Caveat } from "next/font/google";
-import { preload } from "react-dom";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Nav } from "@/components/Nav";
@@ -35,8 +34,6 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  preload("/art/personal-site-kelowna-2.webp", { as: "image" });
-
   return (
     <html
       lang="en"

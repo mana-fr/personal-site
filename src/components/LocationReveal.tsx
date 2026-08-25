@@ -27,6 +27,18 @@ export function LocationReveal({
 
   useEffect(() => setMounted(true), []);
 
+  // Force full decode (not just fetch) well before the first hover, so the
+  // reveal doesn't stutter loading the photo for the first time mid-fade.
+  // Done here (client-side, after mount) rather than via a render-blocking
+  // preload — this image isn't needed for the initial paint, and preloading
+  // it eagerly was competing with actually-critical resources (fonts, JS)
+  // for bandwidth on the initial page load.
+  useEffect(() => {
+    const img = new window.Image();
+    img.src = image;
+    img.decode?.().catch(() => {});
+  }, [image]);
+
   useEffect(() => {
     if (!hovered) return;
     const update = () => {

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { preload } from "react-dom";
 import { Reveal } from "@/components/Reveal";
 import { ArtSpot } from "@/components/ArtSpot";
 import { LocationReveal } from "@/components/LocationReveal";
@@ -29,8 +28,13 @@ const MANA_PHOTOS = [
 ];
 
 export default function Home() {
-  MANA_PHOTOS.forEach((src) => preload(src, { as: "image" }));
-
+  // No eager preload() here — MontageReveal already warms these 15 images up
+  // itself, client-side and non-blocking, after mount (see its own useEffect).
+  // Preloading them here too used to inject <link rel="preload"> for all 15
+  // at once, which Cloudflare elevates to HTTP 103 Early Hints — forcing the
+  // browser to fetch ~2MB of not-yet-visible gallery photos as high priority
+  // before the actual page content, which on a slow connection can stall
+  // everything (this is what was making the page look blank).
   return (
     <div className="relative mx-auto max-w-3xl px-6 pb-24 pt-16 sm:px-8 sm:pt-24">
       <ArtSpot variant={0} className="left-[-70px] top-6 hidden lg:block" rotate={-6} />
@@ -38,7 +42,7 @@ export default function Home() {
 
       <Reveal>
         <p className="text-[15px] leading-relaxed text-muted">
-          hi, i&apos;m{" "}
+          hiya, i&apos;m{" "}
           <MontageReveal
             label="mana"
             images={MANA_PHOTOS}
@@ -50,13 +54,13 @@ export default function Home() {
 
       <Reveal delay={0.08} className="mt-4 max-w-xl">
         <h1 className="text-[15px] leading-relaxed text-foreground sm:text-base">
-          12, based in{" "}
+          i&apos;m 12, i live in{" "}
           <LocationReveal
             label="kelowna, bc"
             image="/art/personal-site-kelowna-2.webp"
             className="text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent"
           />
-          , and the founder and ceo of{" "}
+          , and i build ai that does actual work. right now i&apos;m working on{" "}
           <Link
             href="https://voxaassistant.com"
             target="_blank"
@@ -65,12 +69,11 @@ export default function Home() {
           >
             voxa voice
           </Link>{" "}
-          and{" "}
+          (ai that handles small business calls) and{" "}
           <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
             voxa agents
-          </Link>
-          . i spend most of my time building ai products that quietly do work most people assumed still
-          needed a human.
+          </Link>{" "}
+          (ai that handles small business calls and executes tasks end to end).
         </h1>
       </Reveal>
 
