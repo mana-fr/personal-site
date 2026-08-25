@@ -37,7 +37,7 @@ export default function Press() {
                 href={item.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group block overflow-hidden rounded-2xl border border-border/70 bg-surface transition-colors hover:border-accent/50"
+                className="neu neu-lift group block overflow-hidden rounded-2xl"
               >
                 {item.image &&
                   (item.image2 ? (

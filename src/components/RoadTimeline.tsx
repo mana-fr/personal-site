@@ -38,9 +38,7 @@ const MILESTONES: Milestone[] = [
   {
     age: "age 10",
     title: "finished the gita, gold in texas",
-    description: (
-      <>finished memorizing all 700 verses of the gita and won a gold medal at a competition in texas.</>
-    ),
+    description: <>finished memorizing all 700 verses of the gita and got a gold medal in texas.</>,
   },
   {
     age: "age 11",
@@ -235,7 +233,7 @@ export function RoadTimeline() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-8 max-w-lg rounded-2xl border border-border/70 bg-surface p-6"
+          className="neu mt-8 max-w-lg rounded-2xl p-6"
         >
           <p className="text-[12px] uppercase tracking-widest text-accent">{MILESTONES[activeIndex].age}</p>
           <p className="mt-1 text-[15px] text-foreground">{MILESTONES[activeIndex].title}</p>

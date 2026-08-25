@@ -16,7 +16,7 @@ export function ThemeToggle() {
       type="button"
       aria-label="toggle theme"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/80 text-foreground/70 transition-colors hover:border-accent hover:text-accent"
+      className="neu-sm group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground/70 hover:text-accent"
     >
       <svg
         viewBox="0 0 24 24"

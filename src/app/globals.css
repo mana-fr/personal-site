@@ -8,6 +8,13 @@
   --surface: rgba(0, 0, 0, 0.03);
   --accent: #b23a72;
   --grain-opacity: 0.03;
+  /* Neumorphic shadow pair. Tuned separately per theme rather than derived
+     from --border/--surface — the light-theme background is near-white, so
+     the "shadow" side needs real darkness to read at all; the dark-theme
+     background is near-black, so the "highlight" side has to stay faint or
+     it looks like a glow, not a light source. */
+  --neu-light: rgba(255, 255, 255, 0.9);
+  --neu-dark: rgba(0, 0, 0, 0.13);
 }
 
 :root[data-theme="dark"] {
@@ -18,6 +25,8 @@
   --surface: rgba(255, 255, 255, 0.035);
   --accent: #ff6fb0;
   --grain-opacity: 0.05;
+  --neu-light: rgba(255, 255, 255, 0.055);
+  --neu-dark: rgba(0, 0, 0, 0.75);
 }
 
 @theme inline {
@@ -86,6 +95,46 @@ body {
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+}
+
+/* Neumorphism: a paired light/dark soft shadow that reads as "extruded from
+   the page" — the illusion depends entirely on the element's own fill
+   matching the page background exactly (not a contrasting card color), so
+   the shadow pair is the only thing carrying the shape. No border: a hard
+   edge would fight the soft-shadow illusion. */
+.neu {
+  background: var(--background);
+  box-shadow: 8px 8px 18px var(--neu-dark), -8px -8px 18px var(--neu-light);
+  /* Includes color/background-color so this can replace Tailwind's
+     transition-colors utility outright rather than compete with it — both
+     set the transition shorthand, and whichever applied last would win,
+     silently dropping the other's properties from animating at all. */
+  transition: box-shadow 0.3s ease, transform 0.3s ease, color 0.3s ease, background-color 0.3s ease;
+}
+.neu:active {
+  box-shadow: inset 5px 5px 11px var(--neu-dark), inset -5px -5px 11px var(--neu-light);
+}
+
+/* Smaller shadow spread for compact elements (icon buttons, badges) — the
+   full .neu shadow reads as a smudge at that size. */
+.neu-sm {
+  background: var(--background);
+  box-shadow: 4px 4px 9px var(--neu-dark), -4px -4px 9px var(--neu-light);
+  transition: box-shadow 0.3s ease, color 0.3s ease, background-color 0.3s ease;
+}
+.neu-sm:active {
+  box-shadow: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light);
+}
+
+/* A slight lift + deeper shadow on hover, for elements where that tactile
+   cue reads as interactive (cards) rather than as jitter (buttons, which
+   already get their own :active press-in from .neu/.neu-sm). Always paired
+   with .neu, which already provides the transition timing — adding another
+   `transition` shorthand here would silently override it (last declaration
+   for a shorthand wins the whole property, not just what it mentions). */
+.neu-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 11px 11px 22px var(--neu-dark), -11px -11px 22px var(--neu-light);
 }
 
 @keyframes drift {
