@@ -53,7 +53,7 @@ export default function Home() {
           12, based in{" "}
           <LocationReveal
             label="kelowna, bc"
-            image="/art/personal-site-kelowna.jpg"
+            image="/art/personal-site-kelowna-2.webp"
             className="text-accent underline decoration-accent/50 underline-offset-4 transition-colors hover:decoration-accent"
           />
           , and the founder and ceo of{" "}

@@ -35,7 +35,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  preload("/art/personal-site-kelowna.jpg", { as: "image" });
+  preload("/art/personal-site-kelowna-2.webp", { as: "image" });
 
   return (
     <html
