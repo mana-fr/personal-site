@@ -24,7 +24,18 @@ export function Nav() {
   const didMount = useRef(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 80);
+    // Hysteresis, not a single hard cutoff: a bare `scrollY > 80` flips back
+    // and forth on any natural wobble that settles near that exact pixel
+    // (very common with trackpad momentum scrolling as it decelerates) —
+    // each flip restarts the wordmark's font-size spring mid-flight toward
+    // the opposite target, which is what read as it glitching up and down.
+    // Once scrolled, it takes a real ~40px move back up to un-scroll again,
+    // so a wobble within that band can't retrigger the spring.
+    const ENTER = 80;
+    const EXIT = 40;
+    const onScroll = () => {
+      setScrolled((prev) => (prev ? window.scrollY > EXIT : window.scrollY > ENTER));
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
