@@ -24,21 +24,36 @@ export function Nav() {
   const didMount = useRef(false);
 
   useEffect(() => {
-    // Hysteresis, not a single hard cutoff: a bare `scrollY > 80` flips back
-    // and forth on any natural wobble that settles near that exact pixel
-    // (very common with trackpad momentum scrolling as it decelerates) —
-    // each flip restarts the wordmark's font-size spring mid-flight toward
-    // the opposite target, which is what read as it glitching up and down.
-    // Once scrolled, it takes a real ~40px move back up to un-scroll again,
-    // so a wobble within that band can't retrigger the spring.
+    // Two layers, because hysteresis alone wasn't enough: a bare
+    // `scrollY > 80` flips back and forth on any wobble that settles near
+    // that pixel, and even a wide enter/exit band (80 to un-scroll below 40)
+    // can still get crossed by a SINGLE scroll event if the browser
+    // coalesces a fast momentum scroll into large per-event jumps — Chrome
+    // batches/throttles scroll event dispatch more aggressively than some
+    // other engines, so the same physical scroll can arrive as fewer, bigger
+    // jumps there, each one able to cross both thresholds in one event. On
+    // top of hysteresis, this now also waits for scrolling to actually go
+    // quiet (SETTLE_MS with no further scroll event) before committing to a
+    // state change at all — so no matter how a browser batches or how big
+    // any single jump is, the header can never flip mid-scroll, only once
+    // motion has genuinely stopped.
     const ENTER = 80;
     const EXIT = 40;
-    const onScroll = () => {
+    const SETTLE_MS = 100;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    const commit = () => {
       setScrolled((prev) => (prev ? window.scrollY > EXIT : window.scrollY > ENTER));
     };
-    onScroll();
+    const onScroll = () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(commit, SETTLE_MS);
+    };
+    commit(); // initial state on mount — no need to wait for a first scroll
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (settleTimer) clearTimeout(settleTimer);
+    };
   }, []);
 
   useEffect(() => {
