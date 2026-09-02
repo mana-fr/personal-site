@@ -57,22 +57,49 @@ export function Nav() {
     //      document below the user's scrollY, so the browser clamps scrollY
     //      to the new bottom — potentially past EXIT, which grows the header
     //      back, which restores the room, which lets scrollY climb past
-    //      ENTER again. MIN_SCROLLABLE below guards this: don't allow the
-    //      shrink at all unless there's a big enough margin that collapsing
-    //      can't push the remaining room below EXIT.
+    //      ENTER again. Guarded by only allowing the shrink when there's a
+    //      big enough margin that collapsing can't push the remaining room
+    //      below EXIT.
     //
-    //      This used to be measured live via headerRef.offsetHeight
-    //      (actual expanded/collapsed height, sampled each frame) instead of
-    //      a constant — which sounds more precise but wasn't: a sample taken
-    //      mid-spring (while the header is still animating between sizes,
-    //      not settled) could freeze canShrink against a wrong number, and
-    //      unlike ENTER/EXIT that freeze is easy to get stuck the wrong way
-    //      permanently, since canShrink only ever re-evaluates while
-    //      unscrolled. A fixed constant, comfortably above the header's own
-    //      known shrink amount, can't be thrown off by animation timing.
+    //      Two earlier attempts at that guard both broke on the SAME root
+    //      cause: deciding it from a live DOM read (headerRef.offsetHeight,
+    //      then document.documentElement.scrollHeight) taken at a moment
+    //      that turned out not to be trustworthy. The scrollHeight version
+    //      specifically: it only re-evaluated while unscrolled, which sounds
+    //      safe, but the very FIRST tick after transitioning FROM scrolled
+    //      TO unscrolled is exactly the least trustworthy moment to read it
+    //      — React hasn't re-rendered yet and the spring hasn't started
+    //      growing, so scrollHeight still reflects the collapsed page.
+    //      Traced directly: scrollY reaches 0, correctly decides to expand,
+    //      commits — then the very next frame reads the still-collapsed
+    //      scrollHeight, concludes there's not enough room, and immediately
+    //      reverses that decision back to collapsed. Every future attempt
+    //      to expand hit the identical one-frame-old reading and got
+    //      reversed the same way — permanently stuck.
+    //
+    //      A first fix tried normalizing the reading instead of trusting it
+    //      raw — "what the scroll room would be if the header were fully
+    //      expanded," adding the known collapse amount back on whenever
+    //      currently collapsed. Still broke: the compensation is keyed off
+    //      `isScrolled`, which flips SYNCHRONOUSLY the instant a transition
+    //      is decided, one or more frames before the DOM/spring actually
+    //      catch up — so right after transitioning to unscrolled, the
+    //      formula stops compensating (isScrolled is already false) while
+    //      the real layout is still mid-collapse-recovery, under-measuring
+    //      the same way as before.
+    //
+    //      Fixed properly by not measuring AT ALL for a window after any
+    //      transition — SETTLE_MS, comfortably longer than the fontSize
+    //      spring's own settle time — combined with still only doing so
+    //      while genuinely expanded (see the tick() comment below for why
+    //      both are needed together). A fresh reading is only ever taken
+    //      once the layout has actually finished moving, holding the prior
+    //      (trusted) canShrink value during that whole window instead of
+    //      re-deriving it from a layout that's still catching up.
     const ENTER = 80;
     const EXIT = 40;
     const MIN_SCROLLABLE = 320;
+    const SETTLE_MS = 700; // safely longer than the fontSize spring's settle time
     // Force an INSTANT jump to the top on every page change, rather than
     // trusting Next.js's own default scroll-to-top-on-navigation. The global
     // `scroll-behavior: smooth` on <html> (see globals.css) makes that
@@ -87,7 +114,6 @@ export function Nav() {
     window.scrollTo({ top: 0, behavior: "instant" });
     let raf = 0;
     let isScrolled = false;
-    let canShrink = true;
     // On a fresh page (this effect just re-ran because pathname changed),
     // the `scrolled` REACT STATE can still be left over from the PREVIOUS
     // page (eg. true/small from /socials) while `isScrolled`, the local var
@@ -100,14 +126,19 @@ export function Nav() {
     // Forcing a sync on the first tick regardless of whether the computed
     // value "changed" closes that gap.
     let firstTick = true;
+    let canShrink = true;
+    let lastTransitionTime = -Infinity;
     const tick = () => {
-      // Only re-evaluated while expanded — deliberately never using the
-      // COLLAPSED state's (smaller) maxScroll to decide this, which would
-      // let a page that could shrink safely at the top talk itself back out
-      // of it once already collapsed (canShrink flips false again, which
-      // forces `next = true` regardless of scrollY — permanently stuck
-      // small, unable to re-expand even scrolled all the way up).
-      if (!isScrolled) {
+      const now = performance.now();
+      // Both conditions matter: !isScrolled alone isn't enough (that flips
+      // synchronously the instant a transition is decided, before the DOM
+      // has caught up), and the settle-time check alone isn't enough either
+      // — without also requiring !isScrolled, this would eventually retry
+      // while still collapsed once enough idle time passed, reading the
+      // smaller collapsed-state scrollHeight directly and reintroducing the
+      // same deadlock the other way. Together: only ever measure once
+      // genuinely (not just locally-flagged) expanded.
+      if (!isScrolled && now - lastTransitionTime > SETTLE_MS) {
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
         canShrink = maxScroll >= MIN_SCROLLABLE;
       }
@@ -125,6 +156,7 @@ export function Nav() {
         isScrolled = next;
         setScrolled(next);
         firstTick = false;
+        lastTransitionTime = now;
       }
       raf = requestAnimationFrame(tick);
     };
@@ -132,16 +164,9 @@ export function Nav() {
     return () => cancelAnimationFrame(raf);
     // Re-runs on every route change on purpose. Nav lives in the shared
     // layout, so it never remounts between client-side page navigations —
-    // without `pathname` here, canShrink/expandedH/collapsedH/isScrolled
-    // would be measured ONCE on first mount and then persist unchanged for
-    // the entire session, regardless of which page's content they're
-    // actually being evaluated against. Concretely: visit a page short
-    // enough that canShrink freezes false (eg. /socials), then navigate
-    // anywhere else client-side, and the header would stay stuck small on
-    // every subsequent page forever — canShrink only ever gets a chance to
-    // re-evaluate while `!isScrolled`, but isScrolled was also frozen true,
-    // so nothing could ever unstick it. Each page's scroll geometry is
-    // different and needs to be measured fresh.
+    // without `pathname` here, isScrolled would be measured ONCE on first
+    // mount and then persist unchanged for the entire session, regardless
+    // of which page's content it's actually being evaluated against.
   }, [pathname]);
 
   useEffect(() => {
