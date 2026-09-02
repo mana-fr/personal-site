@@ -90,7 +90,15 @@ export function Nav() {
         canShrink = maxScroll >= needed;
       }
 
-      const next = !canShrink ? false : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
+      // Fall back to the SMALL state, not large, when the page can't safely
+      // support the shrink transition. The header is sticky (stays pinned
+      // while scrolling) — forcing it to stay large on a page too short to
+      // shrink means that large header permanently occupies a big share of
+      // the little space available, and scrolling even slightly runs page
+      // content up underneath/behind it. Small takes up little enough space
+      // that this can't happen, and a content-light page doesn't need the
+      // big hero moment anyway.
+      const next = !canShrink ? true : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
       if (next !== isScrolled) {
         isScrolled = next;
         setScrolled(next);
