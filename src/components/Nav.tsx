@@ -24,36 +24,35 @@ export function Nav() {
   const didMount = useRef(false);
 
   useEffect(() => {
-    // Two layers, because hysteresis alone wasn't enough: a bare
-    // `scrollY > 80` flips back and forth on any wobble that settles near
-    // that pixel, and even a wide enter/exit band (80 to un-scroll below 40)
-    // can still get crossed by a SINGLE scroll event if the browser
-    // coalesces a fast momentum scroll into large per-event jumps — Chrome
-    // batches/throttles scroll event dispatch more aggressively than some
-    // other engines, so the same physical scroll can arrive as fewer, bigger
-    // jumps there, each one able to cross both thresholds in one event. On
-    // top of hysteresis, this now also waits for scrolling to actually go
-    // quiet (SETTLE_MS with no further scroll event) before committing to a
-    // state change at all — so no matter how a browser batches or how big
-    // any single jump is, the header can never flip mid-scroll, only once
-    // motion has genuinely stopped.
+    // Polls window.scrollY directly every frame instead of reacting to
+    // `scroll` events at all. Two earlier approaches both failed on this:
+    // a bare `scrollY > 80` cutoff flapped on any wobble near that pixel,
+    // and debouncing until scrolling went fully quiet made the header lag
+    // behind real scrolling entirely — a continuous trackpad/momentum
+    // scroll can keep firing `scroll` events with no gap for a while, so
+    // "wait for quiet" never got a chance to fire, leaving the large,
+    // transparent-backed header sitting over page content that had already
+    // scrolled up underneath it. Polling sidesteps the `scroll` event
+    // system altogether (however a given browser batches or throttles its
+    // dispatch, e.g. Chrome vs Safari, becomes irrelevant — this never
+    // reads event payloads, only the live scroll position each frame), so
+    // it's exactly as responsive as scrolling itself. Hysteresis (enter at
+    // 80, exit below 40) is kept alongside it purely to stop the boundary
+    // itself from flapping on a single frame's worth of noise.
     const ENTER = 80;
     const EXIT = 40;
-    const SETTLE_MS = 100;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
-    const commit = () => {
-      setScrolled((prev) => (prev ? window.scrollY > EXIT : window.scrollY > ENTER));
+    let raf = 0;
+    let isScrolled = false;
+    const tick = () => {
+      const next = isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
+      if (next !== isScrolled) {
+        isScrolled = next;
+        setScrolled(next);
+      }
+      raf = requestAnimationFrame(tick);
     };
-    const onScroll = () => {
-      if (settleTimer) clearTimeout(settleTimer);
-      settleTimer = setTimeout(commit, SETTLE_MS);
-    };
-    commit(); // initial state on mount — no need to wait for a first scroll
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (settleTimer) clearTimeout(settleTimer);
-    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   useEffect(() => {
