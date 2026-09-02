@@ -70,11 +70,35 @@ export function Nav() {
     const ENTER = 80;
     const EXIT = 40;
     const SETTLE_MARGIN = 40; // room to spare beyond the header's own shrink
+    // Force an INSTANT jump to the top on every page change, rather than
+    // trusting Next.js's own default scroll-to-top-on-navigation. The global
+    // `scroll-behavior: smooth` on <html> (see globals.css) makes that
+    // default animate instead of jump — and that animation was getting
+    // interrupted by the header's own layout shift partway through (a
+    // genuine chicken-and-egg: the first tick below sees the OLD page's
+    // still-high scrollY before the smooth-scroll has finished, shrinks the
+    // header, and that shrink's reflow cancels the in-progress smooth
+    // scroll, leaving it stranded above EXIT forever — reproduced directly,
+    // it was settling around scrollY 56 instead of 0). An instant jump here
+    // means the tick loop below always starts from a real, settled 0.
+    window.scrollTo({ top: 0, behavior: "instant" });
     let raf = 0;
     let isScrolled = false;
     let canShrink = true;
     let expandedH = 0; // header offsetHeight sampled while expanded
     let collapsedH = 0; // ... and while collapsed
+    // On a fresh page (this effect just re-ran because pathname changed),
+    // the `scrolled` REACT STATE can still be left over from the PREVIOUS
+    // page (eg. true/small from /socials) while `isScrolled`, the local var
+    // that drives change-detection below, always restarts at its own
+    // default of false. If those two happen to already agree numerically
+    // (both computing "false" on the very first tick), `next !== isScrolled`
+    // is false, so setScrolled is never called — and the stale React state
+    // is what actually stays on screen, since the local var agreeing with
+    // itself doesn't mean it agrees with what React is still rendering.
+    // Forcing a sync on the first tick regardless of whether the computed
+    // value "changed" closes that gap.
+    let firstTick = true;
     const tick = () => {
       const h = headerRef.current?.offsetHeight ?? 0;
       if (isScrolled) collapsedH = h;
@@ -99,15 +123,28 @@ export function Nav() {
       // that this can't happen, and a content-light page doesn't need the
       // big hero moment anyway.
       const next = !canShrink ? true : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
-      if (next !== isScrolled) {
+      if (next !== isScrolled || firstTick) {
         isScrolled = next;
         setScrolled(next);
+        firstTick = false;
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+    // Re-runs on every route change on purpose. Nav lives in the shared
+    // layout, so it never remounts between client-side page navigations —
+    // without `pathname` here, canShrink/expandedH/collapsedH/isScrolled
+    // would be measured ONCE on first mount and then persist unchanged for
+    // the entire session, regardless of which page's content they're
+    // actually being evaluated against. Concretely: visit a page short
+    // enough that canShrink freezes false (eg. /socials), then navigate
+    // anywhere else client-side, and the header would stay stuck small on
+    // every subsequent page forever — canShrink only ever gets a chance to
+    // re-evaluate while `!isScrolled`, but isScrolled was also frozen true,
+    // so nothing could ever unstick it. Each page's scroll geometry is
+    // different and needs to be measured fresh.
+  }, [pathname]);
 
   useEffect(() => {
     const calc = () => setHeroPx(Math.min(116, Math.max(48, window.innerWidth * 0.09)));
