@@ -625,7 +625,15 @@ export function ParticleWordmark({
         // no DOM read required.
         style={{ fontSize }}
         animate={{ fontSize }}
-        transition={{ fontSize: { type: "spring", stiffness: 140, damping: 16, mass: 0.7 } }}
+        // damping 16 was BELOW critical damping for this stiffness/mass pair
+        // (critical ≈ 19.8 = 2 * sqrt(stiffness * mass)) — a real, measured
+        // underdamped spring, not a perception thing: it shrinks past its
+        // final size and grows back a few px to settle, on every single
+        // transition, independent of when/how often it's triggered. That's
+        // very likely what kept reading as "jumping" even after the actual
+        // scroll-state logic became correct. damping 24 sits comfortably
+        // above critical, so it settles smoothly with zero overshoot.
+        transition={{ fontSize: { type: "spring", stiffness: 140, damping: 24, mass: 0.7 } }}
         className="font-display block origin-top-left select-none italic leading-[1.08] tracking-tight text-foreground"
       >
         {lines.map((line) => (
