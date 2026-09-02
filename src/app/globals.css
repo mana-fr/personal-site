@@ -48,6 +48,16 @@
 
 html {
   scroll-behavior: smooth;
+  /* The sticky header's height changes by ~240px when it collapses on
+     scroll (mostly the wordmark's font-size). Chrome/Firefox scroll
+     anchoring reacts to that above-the-viewport size change by shifting
+     scrollY to "compensate" — which shoves the scroll position back and
+     forth across the header's own enter/exit thresholds and makes it flap
+     between states when you hold the scroll right at the switch point.
+     Safari has no scroll anchoring, which is why this only ever reproduced
+     in Chrome. The header is driven from the real scroll position on
+     purpose, so opt out of the browser second-guessing it. */
+  overflow-anchor: none;
 }
 
 body {

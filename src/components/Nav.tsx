@@ -22,6 +22,7 @@ export function Nav() {
   const [heroPx, setHeroPx] = useState(112);
   const [burstId, setBurstId] = useState(0);
   const didMount = useRef(false);
+  const headerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     // Polls window.scrollY directly every frame instead of reacting to
@@ -40,29 +41,56 @@ export function Nav() {
     // 80, exit below 40) is kept alongside it purely to stop the boundary
     // itself from flapping on a single frame's worth of noise.
     //
-    // MIN_SCROLLABLE guards against a real feedback loop this doesn't fix
-    // on its own: the header is `sticky`, so it still occupies space in
-    // document flow, and its own height shrinks by ~28px when `scrolled`
-    // flips true (pb-10 -> pb-3). That height change alters the page's
-    // total scroll range. On a short page (little content — /socials was
-    // the confirmed case, ~194px of scroll room), shrinking the header
-    // lowers the max scroll position enough that the browser auto-clamps
-    // scrollY back down below EXIT, which grows the header back, which
-    // restores the max scroll and lets scrollY climb back past ENTER
-    // again — a genuine self-sustaining bounce, not noise, reproduced
-    // directly (scrollY and header height both oscillating continuously).
-    // Pages with real content never get close enough to the boundary for
-    // this to matter. Below MIN_SCROLLABLE, the shrink transition is
-    // disabled outright — a page that short doesn't need the space-saving
-    // shrink anyway, so there's no downside to just not attempting it.
+    // The header is `sticky` (still occupies flow space) and its height
+    // drops by ~230-240px when `scrolled` flips true — not the ~28px of
+    // padding (pb-10 -> pb-3) an earlier fix assumed, but the wordmark's two
+    // `font-display` lines collapsing from heroPx (~116) to 18.4px inside
+    // that flow. Losing that much height above the fold caused the header to
+    // flap between states right at the switch point, via two separate
+    // mechanisms:
+    //
+    //   1. Chrome/Firefox scroll anchoring shifting scrollY to "compensate"
+    //      for the size change, shoving it back and forth across ENTER/EXIT.
+    //      Fixed in CSS with `overflow-anchor: none` on <html> — see
+    //      globals.css. (Safari has no scroll anchoring; this was the
+    //      "Chrome-only glitch" from earlier commits.)
+    //
+    //   2. On a short page (/socials), collapsing the header shortens the
+    //      document below the user's scrollY, so the browser clamps scrollY
+    //      to the new bottom — potentially past EXIT, which grows the header
+    //      back. The `canShrink` guard below handles this one: only allow
+    //      the shrink when there's enough scroll room that collapsing by the
+    //      *measured* shrink amount still leaves scrollY (~ENTER at the
+    //      crossing) clear of EXIT. It's evaluated only while the header is
+    //      expanded (!isScrolled) — a stable reading — and frozen while
+    //      scrolled so the collapse can never retract itself. An earlier
+    //      guard compared the *live* maxScroll (itself a function of the
+    //      header's current height) against a fixed 240, which just moved
+    //      the same feedback loop down a level.
     const ENTER = 80;
     const EXIT = 40;
-    const MIN_SCROLLABLE = 240;
+    const SETTLE_MARGIN = 40; // room to spare beyond the header's own shrink
     let raf = 0;
     let isScrolled = false;
+    let canShrink = true;
+    let expandedH = 0; // header offsetHeight sampled while expanded
+    let collapsedH = 0; // ... and while collapsed
     const tick = () => {
+      const h = headerRef.current?.offsetHeight ?? 0;
+      if (isScrolled) collapsedH = h;
+      else expandedH = h;
+      const shrinkDelta = expandedH && collapsedH ? Math.max(0, expandedH - collapsedH) : 0;
+
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      const next = maxScroll < MIN_SCROLLABLE ? false : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
+      if (!isScrolled) {
+        // Before the shrink amount has been measured once, fall back to a
+        // generous fixed floor (comfortably above /socials' scroll room,
+        // well below any page that actually needs the space-saving shrink).
+        const needed = shrinkDelta ? ENTER + shrinkDelta + SETTLE_MARGIN : 400;
+        canShrink = maxScroll >= needed;
+      }
+
+      const next = !canShrink ? false : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
       if (next !== isScrolled) {
         isScrolled = next;
         setScrolled(next);
@@ -90,6 +118,7 @@ export function Nav() {
 
   return (
     <header
+      ref={headerRef}
       className={`sticky top-0 z-50 transition-colors duration-300 ${
         scrolled ? "border-b border-border/70 bg-background/75 backdrop-blur-md" : "border-b border-transparent"
       }`}
