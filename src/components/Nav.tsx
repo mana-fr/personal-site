@@ -39,12 +39,30 @@ export function Nav() {
     // it's exactly as responsive as scrolling itself. Hysteresis (enter at
     // 80, exit below 40) is kept alongside it purely to stop the boundary
     // itself from flapping on a single frame's worth of noise.
+    //
+    // MIN_SCROLLABLE guards against a real feedback loop this doesn't fix
+    // on its own: the header is `sticky`, so it still occupies space in
+    // document flow, and its own height shrinks by ~28px when `scrolled`
+    // flips true (pb-10 -> pb-3). That height change alters the page's
+    // total scroll range. On a short page (little content — /socials was
+    // the confirmed case, ~194px of scroll room), shrinking the header
+    // lowers the max scroll position enough that the browser auto-clamps
+    // scrollY back down below EXIT, which grows the header back, which
+    // restores the max scroll and lets scrollY climb back past ENTER
+    // again — a genuine self-sustaining bounce, not noise, reproduced
+    // directly (scrollY and header height both oscillating continuously).
+    // Pages with real content never get close enough to the boundary for
+    // this to matter. Below MIN_SCROLLABLE, the shrink transition is
+    // disabled outright — a page that short doesn't need the space-saving
+    // shrink anyway, so there's no downside to just not attempting it.
     const ENTER = 80;
     const EXIT = 40;
+    const MIN_SCROLLABLE = 240;
     let raf = 0;
     let isScrolled = false;
     const tick = () => {
-      const next = isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      const next = maxScroll < MIN_SCROLLABLE ? false : isScrolled ? window.scrollY > EXIT : window.scrollY > ENTER;
       if (next !== isScrolled) {
         isScrolled = next;
         setScrolled(next);
