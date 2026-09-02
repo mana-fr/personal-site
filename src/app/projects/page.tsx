@@ -61,8 +61,8 @@ export default function Projects() {
               </div>
               {project.slug === "voxa" ? (
                 <p className="mt-5 max-w-lg text-[14px] leading-relaxed text-muted">
-                  voxa is the umbrella — an ai automation company building products that pick up the
-                  busywork for small and mid-size businesses.{" "}
+                  voxa is the umbrella, an ai automation company building products that pick up the
+                  busywork for founders and businesses.{" "}
                   <Link
                     href="https://voxaassistant.com"
                     target="_blank"
@@ -75,7 +75,7 @@ export default function Projects() {
                   <Link href="https://getvoxa.co" target="_blank" rel="noopener noreferrer" className={voxaLinkClass}>
                     voxa agents
                   </Link>{" "}
-                  both live under it.
+                  both are under it.
                 </p>
               ) : (
                 <p className="mt-5 max-w-lg text-[14px] leading-relaxed text-muted">{project.description}</p>

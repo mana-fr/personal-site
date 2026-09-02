@@ -14,7 +14,7 @@ export const projects: Project[] = [
     name: "voxa",
     tagline: "the company behind everything below",
     description:
-      "voxa is the umbrella — an ai automation company building products that pick up the busywork for small and mid-size businesses. voxa voice and voxa agents both live under it.",
+      "voxa is the umbrella, an ai automation company building products that pick up the busywork for founders and businesses. voxa voice and voxa agents both are under it.",
     tag: "company",
   },
   {
